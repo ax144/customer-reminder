@@ -134,7 +134,7 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         follow_up_today = []
         
         # 1. 检查今天生日的客户
-        birthday_customers = client.table("customers").select("name, birthday, company, position").not_.is_("birthday", "null").execute()
+        birthday_customers = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
         
         for customer in birthday_customers.data:
             if customer['birthday']:
@@ -145,11 +145,12 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                     birthday_today.append({
                         "name": customer['name'],
                         "company": customer.get('company', ''),
-                        "position": customer.get('position', '')
+                        "position": customer.get('position', ''),
+                        "phone": customer.get('phone', '')
                     })
         
         # 2. 检查今天需要跟进的客户
-        follow_up_customers = client.table("customers").select("name, company, position").eq("next_follow_up_date", today.isoformat()).execute()
+        follow_up_customers = client.table("customers").select("name, company, position, phone").eq("next_follow_up_date", today.isoformat()).execute()
         
         # 去重处理
         seen_names = set()
@@ -159,7 +160,8 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                 follow_up_today.append({
                     "name": customer['name'],
                     "company": customer.get('company', ''),
-                    "position": customer.get('position', '')
+                    "position": customer.get('position', ''),
+                    "phone": customer.get('phone', '')
                 })
         
         # 构建输出
@@ -169,14 +171,16 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         if birthday_today:
             output_parts.append("🎂 **今天生日**")
             for customer in birthday_today:
-                output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}")
+                phone_str = f" 📞{customer['phone']}" if customer.get('phone') else ""
+                output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}{phone_str}")
             output_parts.append("")
         
         # 跟进提醒
         if follow_up_today:
             output_parts.append("⏰ **今天跟进**")
             for customer in follow_up_today:
-                output_parts.append(f"• {customer['name']} - {customer['company']}")
+                phone_str = f" 📞{customer['phone']}" if customer.get('phone') else ""
+                output_parts.append(f"• {customer['name']} - {customer['company']}{phone_str}")
             output_parts.append("")
         
         if not output_parts:
@@ -200,17 +204,18 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         birthday_tomorrow = []
         
         # 1. 检查今天已联系的客户（last_contact_date = 今天）
-        contacted_customers = client.table("customers").select("name, company, position").eq("last_contact_date", today.isoformat()).execute()
+        contacted_customers = client.table("customers").select("name, company, position, phone").eq("last_contact_date", today.isoformat()).execute()
         
         for customer in contacted_customers.data:
             contacted_today.append({
                 "name": customer['name'],
                 "company": customer.get('company', ''),
-                "position": customer.get('position', '')
+                "position": customer.get('position', ''),
+                "phone": customer.get('phone', '')
             })
         
         # 2. 检查明天生日的客户
-        birthday_customers = client.table("customers").select("name, birthday, company, position").not_.is_("birthday", "null").execute()
+        birthday_customers = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
         
         for customer in birthday_customers.data:
             if customer['birthday']:
@@ -221,23 +226,28 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
                     birthday_tomorrow.append({
                         "name": customer['name'],
                         "company": customer.get('company', ''),
-                        "position": customer.get('position', '')
+                        "position": customer.get('position', ''),
+                        "phone": customer.get('phone', '')
                     })
         
         # 构建输出
         output_parts = []
         
-        # 今天联系总结
+        # 今天联系列表（不带手机号）
         if contacted_today:
-            output_parts.append(f"📊 **今日联系总结**")
-            output_parts.append(f"今天已联系 **{len(contacted_today)}** 位客户")
+            output_parts.append("📊 **今日已联系客户**")
+            for customer in contacted_today:
+                output_parts.append(f"• {customer['name']} - {customer['company']}")
+            output_parts.append("")
+            output_parts.append(f"✅ 今天已联系 **{len(contacted_today)}** 位客户")
             output_parts.append("")
         
-        # 明天生日提醒
+        # 明天生日提醒（带手机号）
         if birthday_tomorrow:
             output_parts.append("🎂 **明天生日**")
             for customer in birthday_tomorrow:
-                output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}")
+                phone_str = f" 📞{customer['phone']}" if customer.get('phone') else ""
+                output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}{phone_str}")
             output_parts.append("")
         
         if not output_parts:
