@@ -3,7 +3,7 @@
 - save_customer_info: 保存/更新客户信息
 - query_customer_info: 查询客户信息
 - check_reminders: 检查提醒事项
-- get_morning_reminders: 上午推送（今天生日 + 今天跟进）
+- get_morning_reminders: 上午推送（今天生日 + 超过7天未联系）
 - get_afternoon_reminders: 下午推送（今天联系总结 + 明天生日）
 """
 
@@ -130,21 +130,23 @@ def _query_customer_info_impl(
 
 def _get_morning_reminders_impl(ctx=None) -> str:
     """
-    上午推送：今天生日 + 今天跟进
-    注：今天跟进的客户 = 超过7天未联系的客户（7天之内联系过的无需跟进）
+    上午推送：今天生日 + 超过7天未联系的客户
+    逻辑：根据 last_contact_date 自动计算超过7天未联系的客户
     """
     try:
         client = get_supabase_client()
         
         today = datetime.now().date()
+        seven_days_ago = today - timedelta(days=7)
         
         birthday_today: List[Dict[str, str]] = []
-        follow_up_today: List[Dict[str, str]] = []
+        no_contact_over_7_days: List[Dict[str, str]] = []
         
         # 1. 检查今天生日的客户
         birthday_result = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
         birthday_data = cast(List[Dict[str, Any]], birthday_result.data)
         
+        birthday_names: set = set()
         for customer in birthday_data:
             if customer.get('birthday'):
                 try:
@@ -152,8 +154,10 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                     this_year_birthday = birthday_date.replace(year=today.year)
                     
                     if this_year_birthday == today:
+                        name = str(customer.get('name', ''))
+                        birthday_names.add(name)
                         birthday_today.append({
-                            "name": str(customer.get('name', '')),
+                            "name": name,
                             "company": str(customer.get('company', '')),
                             "position": str(customer.get('position', '')),
                             "phone": str(customer.get('phone', ''))
@@ -161,17 +165,37 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                 except:
                     pass
         
-        # 2. 检查今天需要跟进的客户（这些就是超过7天未联系的）
-        follow_up_result = client.table("customers").select("name, company, position, phone").eq("next_follow_up_date", today.isoformat()).execute()
-        follow_up_data = cast(List[Dict[str, Any]], follow_up_result.data)
+        # 2. 检查超过7天未联系的客户（自动计算）
+        all_result = client.table("customers").select("name, company, position, phone, last_contact_date, birthday").execute()
+        all_data = cast(List[Dict[str, Any]], all_result.data)
         
-        # 去重处理
-        seen_names: set = set()
-        for customer in follow_up_data:
+        for customer in all_data:
             name = str(customer.get('name', ''))
-            if name and name not in seen_names:
-                seen_names.add(name)
-                follow_up_today.append({
+            if not name:
+                continue
+            
+            # 排除今天生日的客户（避免重复）
+            if name in birthday_names:
+                continue
+            
+            last_contact = customer.get('last_contact_date')
+            should_remind = False
+            
+            if not last_contact:
+                # 从未联系过，需要跟进
+                should_remind = True
+            else:
+                # 检查是否超过7天
+                try:
+                    last_contact_date = datetime.strptime(str(last_contact), "%Y-%m-%d").date()
+                    if last_contact_date < seven_days_ago:
+                        should_remind = True
+                except:
+                    # 日期格式错误，也提醒
+                    should_remind = True
+            
+            if should_remind:
+                no_contact_over_7_days.append({
                     "name": name,
                     "company": str(customer.get('company', '')),
                     "position": str(customer.get('position', '')),
@@ -189,10 +213,10 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                 output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}{phone_str}")
             output_parts.append("")
         
-        # 跟进提醒（这些就是超过7天未联系的）
-        if follow_up_today:
-            output_parts.append(f"⏰ **今天跟进** (共{len(follow_up_today)}人)")
-            for customer in follow_up_today:
+        # 超过7天未联系
+        if no_contact_over_7_days:
+            output_parts.append(f"⏰ **超过7天未联系** (共{len(no_contact_over_7_days)}人)")
+            for customer in no_contact_over_7_days:
                 phone_str = f" 📞{customer['phone']}" if customer.get('phone') else ""
                 output_parts.append(f"• {customer['name']} - {customer['company']}{phone_str}")
             output_parts.append("")
