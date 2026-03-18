@@ -3,7 +3,7 @@
 - save_customer_info: 保存/更新客户信息
 - query_customer_info: 查询客户信息
 - check_reminders: 检查提醒事项
-- get_morning_reminders: 上午推送（今天生日 + 满7天及超过7天未联系）
+- get_morning_reminders: 上午推送（今天生日 + 超过7天未联系）
 - get_afternoon_reminders: 下午推送（今天联系总结 + 明天生日）
 """
 
@@ -136,26 +136,23 @@ def _get_morning_reminders_impl(ctx=None) -> str:
     上午推送：今天生日 + 满7天及超过7天未联系的客户
     逻辑：最后联系日期 <= 今天 - 7天
     去重逻辑：按 name + phone 组合去重（支持同名不同客户）
-    生日宽限期：生日后2天内不提醒联系
-    
-    示例：
-    - 今天是2026/3/18，7天前是2026/3/11
-    - 最后联系2026/3/11的客户，今天满7天，需要联系
-    - 最后联系2026/3/10的客户，已超过7天，也需要联系（避免错过）
-    - 今天生日的客户，未来2天不提醒联系
     """
     try:
         client = get_supabase_client()
         
-        today = datetime.now().date()
+        # 使用北京时间（GitHub Actions 默认是 UTC）
+        from zoneinfo import ZoneInfo
+        beijing_tz = ZoneInfo("Asia/Shanghai")
+        now_beijing = datetime.now(beijing_tz)
+        today = now_beijing.date()
         seven_days_ago = today - timedelta(days=7)
         
         birthday_today: List[Dict[str, str]] = []
         no_contact_over_7_days: List[Dict[str, str]] = []
         
-        # 用于去重的集合（使用 name+phone 组合）
+        # 用于去重的集合
         birthday_keys: set = set()
-        birthday_grace_period_keys: set = set()  # 生日宽限期（生日后2天内不提醒）
+        birthday_grace_period_keys: set = set()
         reminded_keys: set = set()
         
         # 1. 检查今天生日的客户
@@ -165,7 +162,6 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         for customer in birthday_data:
             if customer.get('birthday'):
                 try:
-                    # 处理不同的日期格式（去掉时区部分）
                     birthday_str = str(customer['birthday'])
                     if 'T' in birthday_str:
                         birthday_str = birthday_str.split('T')[0]
@@ -178,7 +174,6 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                     unique_key = f"{name}_{phone}"
                     
                     if this_year_birthday == today:
-                        # 今天生日
                         if unique_key not in birthday_keys:
                             birthday_keys.add(unique_key)
                             birthday_today.append({
@@ -188,15 +183,14 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                                 "phone": phone
                             })
                     
-                    # 检查是否在生日宽限期内（生日后2天内）
+                    # 生日宽限期（生日后2天内不提醒联系）
                     days_since_birthday = (today - this_year_birthday).days
                     if 0 <= days_since_birthday <= 2:
-                        # 今天生日、昨天生日、前天生日都在宽限期内
                         birthday_grace_period_keys.add(unique_key)
                 except:
                     pass
         
-        # 2. 检查满7天及超过7天未联系的客户（自动计算）
+        # 2. 检查超过7天未联系的客户
         all_result = client.table("customers").select("name, company, position, phone, last_contact_date, birthday").execute()
         all_data = cast(List[Dict[str, Any]], all_result.data)
         
@@ -206,18 +200,14 @@ def _get_morning_reminders_impl(ctx=None) -> str:
             if not name:
                 continue
             
-            # 使用 name+phone 组合作为唯一标识
             unique_key = f"{name}_{phone}"
             
-            # 去重：避免重复添加
             if unique_key in reminded_keys:
                 continue
             
-            # 排除今天生日的客户（避免重复）
             if unique_key in birthday_keys:
                 continue
             
-            # 排除生日宽限期内的客户（生日后2天内不提醒联系）
             if unique_key in birthday_grace_period_keys:
                 continue
             
@@ -225,28 +215,21 @@ def _get_morning_reminders_impl(ctx=None) -> str:
             should_remind = False
             
             if not last_contact:
-                # 从未联系过，需要跟进
                 should_remind = True
             else:
-                # 检查是否超过7天（包括第7天）
                 try:
-                    # 处理不同的日期格式
                     last_contact_str = str(last_contact)
-                    # 如果包含时间部分，只取日期部分
                     if 'T' in last_contact_str:
                         last_contact_str = last_contact_str.split('T')[0]
                     
                     last_contact_date_obj = datetime.strptime(last_contact_str, "%Y-%m-%d").date()
-                    # 提醒满7天及超过7天的客户（避免错过提醒）
                     if last_contact_date_obj <= seven_days_ago:
                         should_remind = True
-                except Exception as e:
-                    # 日期格式错误，也提醒
+                except:
                     should_remind = True
             
             if should_remind:
                 reminded_keys.add(unique_key)
-                # 格式化最后联系日期
                 last_contact_display = ""
                 if last_contact:
                     try:
@@ -268,7 +251,6 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         # 构建输出
         output_parts: List[str] = []
         
-        # 生日提醒
         if birthday_today:
             output_parts.append("🎂 **今天生日**\n")
             for customer in birthday_today:
@@ -276,7 +258,6 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                 output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}{phone_str}")
             output_parts.append("\n")
         
-        # 满7天及超过7天未联系
         if no_contact_over_7_days:
             output_parts.append(f"⏰ **满7天及超过7天未联系** (共{len(no_contact_over_7_days)}人)\n")
             for customer in no_contact_over_7_days:
@@ -299,17 +280,20 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
     try:
         client = get_supabase_client()
         
-        today = datetime.now().date()
+        # 使用北京时间（GitHub Actions 默认是 UTC）
+        from zoneinfo import ZoneInfo
+        beijing_tz = ZoneInfo("Asia/Shanghai")
+        now_beijing = datetime.now(beijing_tz)
+        today = now_beijing.date()
         tomorrow = today + timedelta(days=1)
         
         contacted_today: List[Dict[str, str]] = []
         birthday_tomorrow: List[Dict[str, str]] = []
         
-        # 用于去重的集合
         contacted_keys: set = set()
         birthday_tomorrow_keys: set = set()
         
-        # 1. 检查今天已联系的客户（last_contact_date = 今天）
+        # 1. 检查今天已联系的客户
         contacted_result = client.table("customers").select("name, company, position, phone").eq("last_contact_date", today.isoformat()).execute()
         contacted_data = cast(List[Dict[str, Any]], contacted_result.data)
         
@@ -334,7 +318,6 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         for customer in birthday_data:
             if customer.get('birthday'):
                 try:
-                    # 处理不同的日期格式（去掉时区部分）
                     birthday_str = str(customer['birthday'])
                     if 'T' in birthday_str:
                         birthday_str = birthday_str.split('T')[0]
@@ -361,7 +344,6 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         # 构建输出
         output_parts: List[str] = []
         
-        # 今天联系列表（不带手机号）
         if contacted_today:
             output_parts.append("📊 **今日已联系客户**\n")
             for customer in contacted_today:
@@ -369,7 +351,6 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
             output_parts.append("\n")
             output_parts.append(f"✅ 今天已联系 **{len(contacted_today)}** 位客户\n")
         
-        # 明天生日提醒（带手机号）
         if birthday_tomorrow:
             output_parts.append("🎂 **明天生日**\n")
             for customer in birthday_tomorrow:
@@ -392,15 +373,16 @@ def _check_reminders_impl(days_ahead: int = 7, ctx=None) -> str:
 
 
 def _mark_contacted_impl(name: str, phone: Optional[str] = None, ctx=None) -> str:
-    """
-    标记客户为已联系
-    更新 last_contact_date 为今天，7天内不再提醒
-    """
+    """标记客户为已联系"""
     try:
         client = get_supabase_client()
-        today = datetime.now().date().isoformat()
         
-        # 查找客户
+        # 使用北京时间
+        from zoneinfo import ZoneInfo
+        beijing_tz = ZoneInfo("Asia/Shanghai")
+        now_beijing = datetime.now(beijing_tz)
+        today = now_beijing.date().isoformat()
+        
         query = client.table("customers").select("id, name, company").eq("name", name)
         if phone:
             query = query.eq("phone", phone)
@@ -413,10 +395,9 @@ def _mark_contacted_impl(name: str, phone: Optional[str] = None, ctx=None) -> st
         customer = result_data[0]
         customer_id = customer["id"]
         
-        # 更新最后联系日期
         client.table("customers").update({
             "last_contact_date": today,
-            "updated_at": datetime.now().isoformat()
+            "updated_at": now_beijing.isoformat()
         }).eq("id", customer_id).execute()
         
         return f"✅ 已标记 {name}（{customer.get('company', '未知公司')}）为已联系，7天内不再提醒"
@@ -426,13 +407,10 @@ def _mark_contacted_impl(name: str, phone: Optional[str] = None, ctx=None) -> st
 
 
 def _delete_customer_impl(name: str, phone: Optional[str] = None, reason: Optional[str] = None, ctx=None) -> str:
-    """
-    删除客户（不再合作）
-    """
+    """删除客户"""
     try:
         client = get_supabase_client()
         
-        # 查找客户
         query = client.table("customers").select("id, name, company").eq("name", name)
         if phone:
             query = query.eq("phone", phone)
@@ -445,7 +423,6 @@ def _delete_customer_impl(name: str, phone: Optional[str] = None, reason: Option
         customer = result_data[0]
         customer_id = customer["id"]
         
-        # 删除客户
         client.table("customers").delete().eq("id", customer_id).execute()
         
         reason_str = f"，原因：{reason}" if reason else ""
@@ -455,7 +432,7 @@ def _delete_customer_impl(name: str, phone: Optional[str] = None, reason: Option
         return f"❌ 删除失败：{str(e)}"
 
 
-# ============ Tool函数（调用普通函数）============
+# ============ Tool函数 ============
 
 @tool
 def save_customer_info(
@@ -505,13 +482,13 @@ def check_reminders(days_ahead: int = 7, runtime: ToolRuntime = None) -> str:
 
 @tool
 def mark_contacted(name: str, phone: Optional[str] = None, runtime: ToolRuntime = None) -> str:
-    """标记客户为已联系，更新最后联系日期为今天，7天内不再提醒"""
+    """标记客户为已联系，更新最后联系日期为今天"""
     ctx = runtime.context if runtime else new_context(method="mark_contacted")
     return _mark_contacted_impl(name, phone, ctx)
 
 
 @tool
 def delete_customer(name: str, phone: Optional[str] = None, reason: Optional[str] = None, runtime: ToolRuntime = None) -> str:
-    """删除客户（不再合作），从数据库中移除该客户"""
+    """删除客户"""
     ctx = runtime.context if runtime else new_context(method="delete_customer")
     return _delete_customer_impl(name, phone, reason, ctx)
