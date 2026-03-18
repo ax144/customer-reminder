@@ -11,7 +11,7 @@ from langchain.tools import tool, ToolRuntime
 from coze_coding_utils.runtime_ctx.context import new_context
 from storage.database.supabase_client import get_supabase_client
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Dict, Any, cast
 
 # ============ 普通函数（包含实际逻辑）============
 
@@ -34,7 +34,7 @@ def _save_customer_info_impl(
     try:
         client = get_supabase_client()
         
-        customer_data = {
+        customer_data: Dict[str, Any] = {
             "name": name,
             "company": company,
             "position": position,
@@ -50,18 +50,22 @@ def _save_customer_info_impl(
             "updated_at": datetime.now().isoformat()
         }
         
+        # 过滤掉None值
         customer_data = {k: v for k, v in customer_data.items() if v is not None}
         
+        # 检查客户是否已存在
         existing = client.table("customers").select("id").eq("name", name).execute()
+        existing_data = cast(List[Dict[str, Any]], existing.data)
         
-        if existing.data:
-            customer_id = existing.data[0]["id"]
+        if existing_data:
+            customer_id = existing_data[0]["id"]
             client.table("customers").update(customer_data).eq("id", customer_id).execute()
             return f"✅ 客户信息已更新：{name} (ID: {customer_id})"
         else:
             customer_data["created_at"] = datetime.now().isoformat()
             result = client.table("customers").insert(customer_data).execute()
-            customer_id = result.data[0]["id"]
+            result_data = cast(List[Dict[str, Any]], result.data)
+            customer_id = result_data[0]["id"]
             return f"✅ 新客户已保存：{name} (ID: {customer_id})"
             
     except Exception as e:
@@ -92,13 +96,14 @@ def _query_customer_info_impl(
             query = query.eq("relationship_strength", relationship_strength)
         
         result = query.limit(limit).order("updated_at", desc=True).execute()
+        result_data = cast(List[Dict[str, Any]], result.data)
         
-        if not result.data:
+        if not result_data:
             return "📭 未找到匹配的客户信息"
         
-        output = f"📋 找到 {len(result.data)} 条客户记录：\n\n"
-        for i, customer in enumerate(result.data, 1):
-            output += f"**{i}. {customer['name']}**\n"
+        output = f"📋 找到 {len(result_data)} 条客户记录：\n\n"
+        for i, customer in enumerate(result_data, 1):
+            output += f"**{i}. {customer.get('name', '')}**\n"
             if customer.get('company'):
                 output += f"   🏢 公司：{customer['company']}\n"
             if customer.get('position'):
@@ -124,48 +129,57 @@ def _query_customer_info_impl(
 
 
 def _get_morning_reminders_impl(ctx=None) -> str:
-    """上午推送：今天生日 + 今天跟进"""
+    """
+    上午推送：今天生日 + 今天跟进
+    注：今天跟进的客户 = 超过7天未联系的客户（7天之内联系过的无需跟进）
+    """
     try:
         client = get_supabase_client()
         
         today = datetime.now().date()
         
-        birthday_today = []
-        follow_up_today = []
+        birthday_today: List[Dict[str, str]] = []
+        follow_up_today: List[Dict[str, str]] = []
         
         # 1. 检查今天生日的客户
-        birthday_customers = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
+        birthday_result = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
+        birthday_data = cast(List[Dict[str, Any]], birthday_result.data)
         
-        for customer in birthday_customers.data:
-            if customer['birthday']:
-                birthday_date = datetime.strptime(customer['birthday'], "%Y-%m-%d").date()
-                this_year_birthday = birthday_date.replace(year=today.year)
-                
-                if this_year_birthday == today:
-                    birthday_today.append({
-                        "name": customer['name'],
-                        "company": customer.get('company', ''),
-                        "position": customer.get('position', ''),
-                        "phone": customer.get('phone', '')
-                    })
+        for customer in birthday_data:
+            if customer.get('birthday'):
+                try:
+                    birthday_date = datetime.strptime(str(customer['birthday']), "%Y-%m-%d").date()
+                    this_year_birthday = birthday_date.replace(year=today.year)
+                    
+                    if this_year_birthday == today:
+                        birthday_today.append({
+                            "name": str(customer.get('name', '')),
+                            "company": str(customer.get('company', '')),
+                            "position": str(customer.get('position', '')),
+                            "phone": str(customer.get('phone', ''))
+                        })
+                except:
+                    pass
         
-        # 2. 检查今天需要跟进的客户
-        follow_up_customers = client.table("customers").select("name, company, position, phone").eq("next_follow_up_date", today.isoformat()).execute()
+        # 2. 检查今天需要跟进的客户（这些就是超过7天未联系的）
+        follow_up_result = client.table("customers").select("name, company, position, phone").eq("next_follow_up_date", today.isoformat()).execute()
+        follow_up_data = cast(List[Dict[str, Any]], follow_up_result.data)
         
         # 去重处理
-        seen_names = set()
-        for customer in follow_up_customers.data:
-            if customer['name'] not in seen_names:
-                seen_names.add(customer['name'])
+        seen_names: set = set()
+        for customer in follow_up_data:
+            name = str(customer.get('name', ''))
+            if name and name not in seen_names:
+                seen_names.add(name)
                 follow_up_today.append({
-                    "name": customer['name'],
-                    "company": customer.get('company', ''),
-                    "position": customer.get('position', ''),
-                    "phone": customer.get('phone', '')
+                    "name": name,
+                    "company": str(customer.get('company', '')),
+                    "position": str(customer.get('position', '')),
+                    "phone": str(customer.get('phone', ''))
                 })
         
         # 构建输出
-        output_parts = []
+        output_parts: List[str] = []
         
         # 生日提醒
         if birthday_today:
@@ -175,9 +189,9 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                 output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}{phone_str}")
             output_parts.append("")
         
-        # 跟进提醒
+        # 跟进提醒（这些就是超过7天未联系的）
         if follow_up_today:
-            output_parts.append("⏰ **今天跟进**")
+            output_parts.append(f"⏰ **今天跟进** (共{len(follow_up_today)}人)")
             for customer in follow_up_today:
                 phone_str = f" 📞{customer['phone']}" if customer.get('phone') else ""
                 output_parts.append(f"• {customer['name']} - {customer['company']}{phone_str}")
@@ -200,38 +214,43 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         today = datetime.now().date()
         tomorrow = today + timedelta(days=1)
         
-        contacted_today = []
-        birthday_tomorrow = []
+        contacted_today: List[Dict[str, str]] = []
+        birthday_tomorrow: List[Dict[str, str]] = []
         
         # 1. 检查今天已联系的客户（last_contact_date = 今天）
-        contacted_customers = client.table("customers").select("name, company, position, phone").eq("last_contact_date", today.isoformat()).execute()
+        contacted_result = client.table("customers").select("name, company, position, phone").eq("last_contact_date", today.isoformat()).execute()
+        contacted_data = cast(List[Dict[str, Any]], contacted_result.data)
         
-        for customer in contacted_customers.data:
+        for customer in contacted_data:
             contacted_today.append({
-                "name": customer['name'],
-                "company": customer.get('company', ''),
-                "position": customer.get('position', ''),
-                "phone": customer.get('phone', '')
+                "name": str(customer.get('name', '')),
+                "company": str(customer.get('company', '')),
+                "position": str(customer.get('position', '')),
+                "phone": str(customer.get('phone', ''))
             })
         
         # 2. 检查明天生日的客户
-        birthday_customers = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
+        birthday_result = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
+        birthday_data = cast(List[Dict[str, Any]], birthday_result.data)
         
-        for customer in birthday_customers.data:
-            if customer['birthday']:
-                birthday_date = datetime.strptime(customer['birthday'], "%Y-%m-%d").date()
-                this_year_birthday = birthday_date.replace(year=today.year)
-                
-                if this_year_birthday == tomorrow:
-                    birthday_tomorrow.append({
-                        "name": customer['name'],
-                        "company": customer.get('company', ''),
-                        "position": customer.get('position', ''),
-                        "phone": customer.get('phone', '')
-                    })
+        for customer in birthday_data:
+            if customer.get('birthday'):
+                try:
+                    birthday_date = datetime.strptime(str(customer['birthday']), "%Y-%m-%d").date()
+                    this_year_birthday = birthday_date.replace(year=today.year)
+                    
+                    if this_year_birthday == tomorrow:
+                        birthday_tomorrow.append({
+                            "name": str(customer.get('name', '')),
+                            "company": str(customer.get('company', '')),
+                            "position": str(customer.get('position', '')),
+                            "phone": str(customer.get('phone', ''))
+                        })
+                except:
+                    pass
         
         # 构建输出
-        output_parts = []
+        output_parts: List[str] = []
         
         # 今天联系列表（不带手机号）
         if contacted_today:
