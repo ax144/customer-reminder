@@ -53,8 +53,11 @@ def _save_customer_info_impl(
         # 过滤掉None值
         customer_data = {k: v for k, v in customer_data.items() if v is not None}
         
-        # 检查客户是否已存在
-        existing = client.table("customers").select("id").eq("name", name).execute()
+        # 检查客户是否已存在（按name + phone组合判断）
+        query = client.table("customers").select("id").eq("name", name)
+        if phone:
+            query = query.eq("phone", phone)
+        existing = query.execute()
         existing_data = cast(List[Dict[str, Any]], existing.data)
         
         if existing_data:
@@ -132,6 +135,7 @@ def _get_morning_reminders_impl(ctx=None) -> str:
     """
     上午推送：今天生日 + 超过7天未联系的客户
     逻辑：根据 last_contact_date 自动计算超过7天未联系的客户
+    去重逻辑：按 name + phone 组合去重（支持同名不同客户）
     """
     try:
         client = get_supabase_client()
@@ -142,9 +146,9 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         birthday_today: List[Dict[str, str]] = []
         no_contact_over_7_days: List[Dict[str, str]] = []
         
-        # 用于去重的集合
-        birthday_names: set = set()
-        reminded_names: set = set()  # 已经加入提醒列表的名字
+        # 用于去重的集合（使用 name+phone 组合）
+        birthday_keys: set = set()
+        reminded_keys: set = set()
         
         # 1. 检查今天生日的客户
         birthday_result = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
@@ -158,14 +162,17 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                     
                     if this_year_birthday == today:
                         name = str(customer.get('name', ''))
-                        # 去重：避免同一客户重复添加
-                        if name and name not in birthday_names:
-                            birthday_names.add(name)
+                        phone = str(customer.get('phone', ''))
+                        # 使用 name+phone 组合作为唯一标识
+                        unique_key = f"{name}_{phone}"
+                        
+                        if unique_key not in birthday_keys:
+                            birthday_keys.add(unique_key)
                             birthday_today.append({
                                 "name": name,
                                 "company": str(customer.get('company', '')),
                                 "position": str(customer.get('position', '')),
-                                "phone": str(customer.get('phone', ''))
+                                "phone": phone
                             })
                 except:
                     pass
@@ -176,15 +183,19 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         
         for customer in all_data:
             name = str(customer.get('name', ''))
+            phone = str(customer.get('phone', ''))
             if not name:
                 continue
             
+            # 使用 name+phone 组合作为唯一标识
+            unique_key = f"{name}_{phone}"
+            
             # 去重：避免重复添加
-            if name in reminded_names:
+            if unique_key in reminded_keys:
                 continue
             
             # 排除今天生日的客户（避免重复）
-            if name in birthday_names:
+            if unique_key in birthday_keys:
                 continue
             
             last_contact = customer.get('last_contact_date')
@@ -196,20 +207,21 @@ def _get_morning_reminders_impl(ctx=None) -> str:
             else:
                 # 检查是否超过7天
                 try:
-                    last_contact_date = datetime.strptime(str(last_contact), "%Y-%m-%d").date()
-                    if last_contact_date < seven_days_ago:
+                    last_contact_date_obj = datetime.strptime(str(last_contact), "%Y-%m-%d").date()
+                    if last_contact_date_obj < seven_days_ago:
                         should_remind = True
                 except:
                     # 日期格式错误，也提醒
                     should_remind = True
             
             if should_remind:
-                reminded_names.add(name)  # 标记为已添加
+                reminded_keys.add(unique_key)
                 no_contact_over_7_days.append({
                     "name": name,
                     "company": str(customer.get('company', '')),
                     "position": str(customer.get('position', '')),
-                    "phone": str(customer.get('phone', ''))
+                    "phone": phone,
+                    "last_contact_date": str(last_contact) if last_contact else ""
                 })
         
         # 构建输出
@@ -217,18 +229,19 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         
         # 生日提醒
         if birthday_today:
-            output_parts.append("🎂 **今天生日**")
+            output_parts.append("🎂 **今天生日**\n")
             for customer in birthday_today:
                 phone_str = f" 📞{customer['phone']}" if customer.get('phone') else ""
                 output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}{phone_str}")
-            output_parts.append("")
+            output_parts.append("\n")
         
         # 超过7天未联系
         if no_contact_over_7_days:
-            output_parts.append(f"⏰ **超过7天未联系** (共{len(no_contact_over_7_days)}人)")
+            output_parts.append(f"⏰ **超过7天未联系** (共{len(no_contact_over_7_days)}人)\n")
             for customer in no_contact_over_7_days:
                 phone_str = f" 📞{customer['phone']}" if customer.get('phone') else ""
-                output_parts.append(f"• {customer['name']} - {customer['company']}{phone_str}")
+                last_contact_str = f"（最后联系：{customer['last_contact_date']}）" if customer.get('last_contact_date') else "（从未联系）"
+                output_parts.append(f"• {customer['name']} - {customer['company']}{phone_str} {last_contact_str}")
             output_parts.append("")
         
         if not output_parts:
@@ -252,8 +265,8 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         birthday_tomorrow: List[Dict[str, str]] = []
         
         # 用于去重的集合
-        contacted_names: set = set()
-        birthday_tomorrow_names: set = set()
+        contacted_keys: set = set()
+        birthday_tomorrow_keys: set = set()
         
         # 1. 检查今天已联系的客户（last_contact_date = 今天）
         contacted_result = client.table("customers").select("name, company, position, phone").eq("last_contact_date", today.isoformat()).execute()
@@ -261,14 +274,16 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         
         for customer in contacted_data:
             name = str(customer.get('name', ''))
-            # 去重
-            if name and name not in contacted_names:
-                contacted_names.add(name)
+            phone = str(customer.get('phone', ''))
+            unique_key = f"{name}_{phone}"
+            
+            if unique_key not in contacted_keys:
+                contacted_keys.add(unique_key)
                 contacted_today.append({
                     "name": name,
                     "company": str(customer.get('company', '')),
                     "position": str(customer.get('position', '')),
-                    "phone": str(customer.get('phone', ''))
+                    "phone": phone
                 })
         
         # 2. 检查明天生日的客户
@@ -283,14 +298,16 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
                     
                     if this_year_birthday == tomorrow:
                         name = str(customer.get('name', ''))
-                        # 去重
-                        if name and name not in birthday_tomorrow_names:
-                            birthday_tomorrow_names.add(name)
+                        phone = str(customer.get('phone', ''))
+                        unique_key = f"{name}_{phone}"
+                        
+                        if unique_key not in birthday_tomorrow_keys:
+                            birthday_tomorrow_keys.add(unique_key)
                             birthday_tomorrow.append({
                                 "name": name,
                                 "company": str(customer.get('company', '')),
                                 "position": str(customer.get('position', '')),
-                                "phone": str(customer.get('phone', ''))
+                                "phone": phone
                             })
                 except:
                     pass
@@ -300,16 +317,15 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         
         # 今天联系列表（不带手机号）
         if contacted_today:
-            output_parts.append("📊 **今日已联系客户**")
+            output_parts.append("📊 **今日已联系客户**\n")
             for customer in contacted_today:
                 output_parts.append(f"• {customer['name']} - {customer['company']}")
-            output_parts.append("")
-            output_parts.append(f"✅ 今天已联系 **{len(contacted_today)}** 位客户")
-            output_parts.append("")
+            output_parts.append("\n")
+            output_parts.append(f"✅ 今天已联系 **{len(contacted_today)}** 位客户\n")
         
         # 明天生日提醒（带手机号）
         if birthday_tomorrow:
-            output_parts.append("🎂 **明天生日**")
+            output_parts.append("🎂 **明天生日**\n")
             for customer in birthday_tomorrow:
                 phone_str = f" 📞{customer['phone']}" if customer.get('phone') else ""
                 output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}{phone_str}")
