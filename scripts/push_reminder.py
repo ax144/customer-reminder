@@ -12,7 +12,7 @@ from datetime import datetime
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tools.notification_pusher import _push_morning_reminders_impl, _push_afternoon_reminders_impl
+from tools.notification_pusher import _push_morning_reminders_impl, _push_afternoon_reminders_impl
 
 
 def main():
