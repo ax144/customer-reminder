@@ -1,0 +1,37 @@
+name: Daily Customer Reminder
+
+on:
+  schedule:
+    # 早上8:45推送 (北京时间8:45 = UTC 0:45)
+    - cron: '45 0 * * *'
+    # 下午16:45推送 (北京时间16:45 = UTC 8:45)
+    - cron: '45 8 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  push-reminder:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run reminder script
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        COZE_WORKLOAD_IDENTITY_API_KEY: ${{ secrets.COZE_WORKLOAD_IDENTITY_API_KEY }}
+        COZE_INTEGRATION_MODEL_BASE_URL: ${{ secrets.COZE_INTEGRATION_MODEL_BASE_URL }}
+      run: |
+        python scripts/push_reminder.py
