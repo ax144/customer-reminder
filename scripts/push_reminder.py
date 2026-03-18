@@ -1,20 +1,22 @@
 """
 每日提醒推送脚本
 由GitHub Actions定时调用
+- 上午8:45：今天生日 + 今天跟进
+- 下午16:45：今天联系总结 + 明天生日
 """
 
 import os
 import sys
+from datetime import datetime
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tools.customer_manager import _check_reminders_impl
-from src.tools.notification_pusher import _push_reminders_to_feishu_impl
+from src.tools.notification_pusher import _push_morning_reminders_impl, _push_afternoon_reminders_impl
 
 
 def main():
-    """主函数：检查提醒并推送到飞书"""
+    """主函数：根据时间推送不同的提醒"""
     print("=" * 50)
     print("📅 开始执行每日提醒推送任务")
     print("=" * 50)
@@ -33,14 +35,18 @@ def main():
     
     print("✅ 环境变量检查通过")
     
-    # 检查提醒
-    print("\n📋 正在检查提醒事项...")
-    reminders = _check_reminders_impl(days_ahead=7)
-    print(reminders)
+    # 判断是上午还是下午
+    current_hour = datetime.now().hour
     
-    # 推送到飞书
-    print("\n📤 正在推送到飞书...")
-    result = _push_reminders_to_feishu_impl()
+    if current_hour < 12:
+        # 上午推送
+        print("\n☀️ 上午推送模式")
+        result = _push_morning_reminders_impl()
+    else:
+        # 下午推送
+        print("\n🌅 下午推送模式")
+        result = _push_afternoon_reminders_impl()
+    
     print(result)
     
     print("\n" + "=" * 50)
