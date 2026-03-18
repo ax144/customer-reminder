@@ -15,7 +15,7 @@ from coze_coding_utils.runtime_ctx.context import default_headers
 
 from src.storage.memory.memory_saver import get_memory_saver
 from src.tools.customer_manager import save_customer_info, query_customer_info, check_reminders
-from src.tools.notification_pusher import push_reminders_to_feishu, send_custom_message_to_feishu
+from src.tools.notification_pusher import push_morning_reminders, push_afternoon_reminders, push_reminders_to_feishu, send_custom_message_to_feishu
 from src.tools.batch_import import import_customers_from_excel, get_import_template
 from src.tools.web_search_tool import web_search
 
@@ -66,6 +66,8 @@ def build_agent(ctx=None):
         save_customer_info,
         query_customer_info,
         check_reminders,
+        push_morning_reminders,
+        push_afternoon_reminders,
         push_reminders_to_feishu,
         send_custom_message_to_feishu,
         import_customers_from_excel,
