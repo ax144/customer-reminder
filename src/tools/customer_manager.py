@@ -3,7 +3,7 @@
 - save_customer_info: 保存/更新客户信息
 - query_customer_info: 查询客户信息
 - check_reminders: 检查提醒事项
-- get_morning_reminders: 上午推送（今天生日 + 超过7天未联系）
+- get_morning_reminders: 上午推送（今天生日 + 满7天及超过7天未联系）
 - get_afternoon_reminders: 下午推送（今天联系总结 + 明天生日）
 """
 
@@ -136,11 +136,13 @@ def _get_morning_reminders_impl(ctx=None) -> str:
     上午推送：今天生日 + 满7天及超过7天未联系的客户
     逻辑：最后联系日期 <= 今天 - 7天
     去重逻辑：按 name + phone 组合去重（支持同名不同客户）
+    生日宽限期：生日后2天内不提醒联系
     
     示例：
     - 今天是2026/3/18，7天前是2026/3/11
     - 最后联系2026/3/11的客户，今天满7天，需要联系
     - 最后联系2026/3/10的客户，已超过7天，也需要联系（避免错过）
+    - 今天生日的客户，未来2天不提醒联系
     """
     try:
         client = get_supabase_client()
@@ -153,6 +155,7 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         
         # 用于去重的集合（使用 name+phone 组合）
         birthday_keys: set = set()
+        birthday_grace_period_keys: set = set()  # 生日宽限期（生日后2天内不提醒）
         reminded_keys: set = set()
         
         # 1. 检查今天生日的客户
@@ -162,15 +165,20 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         for customer in birthday_data:
             if customer.get('birthday'):
                 try:
-                    birthday_date = datetime.strptime(str(customer['birthday']), "%Y-%m-%d").date()
+                    # 处理不同的日期格式（去掉时区部分）
+                    birthday_str = str(customer['birthday'])
+                    if 'T' in birthday_str:
+                        birthday_str = birthday_str.split('T')[0]
+                    
+                    birthday_date = datetime.strptime(birthday_str, "%Y-%m-%d").date()
                     this_year_birthday = birthday_date.replace(year=today.year)
                     
+                    name = str(customer.get('name', ''))
+                    phone = str(customer.get('phone', ''))
+                    unique_key = f"{name}_{phone}"
+                    
                     if this_year_birthday == today:
-                        name = str(customer.get('name', ''))
-                        phone = str(customer.get('phone', ''))
-                        # 使用 name+phone 组合作为唯一标识
-                        unique_key = f"{name}_{phone}"
-                        
+                        # 今天生日
                         if unique_key not in birthday_keys:
                             birthday_keys.add(unique_key)
                             birthday_today.append({
@@ -179,10 +187,16 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                                 "position": str(customer.get('position', '')),
                                 "phone": phone
                             })
+                    
+                    # 检查是否在生日宽限期内（生日后2天内）
+                    days_since_birthday = (today - this_year_birthday).days
+                    if 0 <= days_since_birthday <= 2:
+                        # 今天生日、昨天生日、前天生日都在宽限期内
+                        birthday_grace_period_keys.add(unique_key)
                 except:
                     pass
         
-        # 2. 检查超过7天未联系的客户（自动计算）
+        # 2. 检查满7天及超过7天未联系的客户（自动计算）
         all_result = client.table("customers").select("name, company, position, phone, last_contact_date, birthday").execute()
         all_data = cast(List[Dict[str, Any]], all_result.data)
         
@@ -201,6 +215,10 @@ def _get_morning_reminders_impl(ctx=None) -> str:
             
             # 排除今天生日的客户（避免重复）
             if unique_key in birthday_keys:
+                continue
+            
+            # 排除生日宽限期内的客户（生日后2天内不提醒联系）
+            if unique_key in birthday_grace_period_keys:
                 continue
             
             last_contact = customer.get('last_contact_date')
@@ -316,7 +334,12 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         for customer in birthday_data:
             if customer.get('birthday'):
                 try:
-                    birthday_date = datetime.strptime(str(customer['birthday']), "%Y-%m-%d").date()
+                    # 处理不同的日期格式（去掉时区部分）
+                    birthday_str = str(customer['birthday'])
+                    if 'T' in birthday_str:
+                        birthday_str = birthday_str.split('T')[0]
+                    
+                    birthday_date = datetime.strptime(birthday_str, "%Y-%m-%d").date()
                     this_year_birthday = birthday_date.replace(year=today.year)
                     
                     if this_year_birthday == tomorrow:
