@@ -9,8 +9,10 @@ import os
 import sys
 from datetime import datetime
 
-# 添加项目根目录到Python路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 添加项目根目录和src目录到Python路径
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src_path = os.path.join(project_root, 'src')
+sys.path.insert(0, src_path)
 
 from tools.notification_pusher import _push_morning_reminders_impl, _push_afternoon_reminders_impl
 
