@@ -16,6 +16,8 @@
         "save_customer_info",
         "query_customer_info",
         "check_reminders",
+        "mark_contacted",
+        "delete_customer",
         "push_morning_reminders",
         "push_afternoon_reminders",
         "push_reminders_to_feishu",
