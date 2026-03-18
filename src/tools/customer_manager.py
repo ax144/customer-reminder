@@ -9,7 +9,7 @@
 
 from langchain.tools import tool, ToolRuntime
 from coze_coding_utils.runtime_ctx.context import new_context
-from src.storage.database.supabase_client import get_supabase_client
+from storage.database.supabase_client import get_supabase_client
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -32,7 +32,7 @@ def _save_customer_info_impl(
 ) -> str:
     """保存客户信息的实际逻辑"""
     try:
-        client = get_supabase_client(ctx)
+        client = get_supabase_client()
         
         customer_data = {
             "name": name,
@@ -78,7 +78,7 @@ def _query_customer_info_impl(
 ) -> str:
     """查询客户信息的实际逻辑"""
     try:
-        client = get_supabase_client(ctx)
+        client = get_supabase_client()
         
         query = client.table("customers").select("*")
         
@@ -126,7 +126,7 @@ def _query_customer_info_impl(
 def _get_morning_reminders_impl(ctx=None) -> str:
     """上午推送：今天生日 + 今天跟进"""
     try:
-        client = get_supabase_client(ctx)
+        client = get_supabase_client()
         
         today = datetime.now().date()
         
@@ -195,7 +195,7 @@ def _get_morning_reminders_impl(ctx=None) -> str:
 def _get_afternoon_reminders_impl(ctx=None) -> str:
     """下午推送：今天联系总结 + 明天生日"""
     try:
-        client = get_supabase_client(ctx)
+        client = get_supabase_client()
         
         today = datetime.now().date()
         tomorrow = today + timedelta(days=1)
