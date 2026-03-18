@@ -20,7 +20,7 @@ def _push_morning_reminders_impl(ctx=None) -> str:
         if not webhook_url:
             return "❌ 未配置飞书Webhook URL"
         
-        from src.tools.customer_manager import _get_morning_reminders_impl
+        from tools.customer_manager import _get_morning_reminders_impl
         reminders_text = _get_morning_reminders_impl(ctx=ctx)
         
         today = datetime.now().strftime("%Y年%m月%d日")
@@ -71,7 +71,7 @@ def _push_afternoon_reminders_impl(ctx=None) -> str:
         if not webhook_url:
             return "❌ 未配置飞书Webhook URL"
         
-        from src.tools.customer_manager import _get_afternoon_reminders_impl
+        from tools.customer_manager import _get_afternoon_reminders_impl
         reminders_text = _get_afternoon_reminders_impl(ctx=ctx)
         
         today = datetime.now().strftime("%Y年%m月%d日")
