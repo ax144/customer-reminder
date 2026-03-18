@@ -13,6 +13,19 @@ from storage.database.supabase_client import get_supabase_client
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, cast
 
+
+def _get_beijing_now():
+    """获取北京时间（UTC+8）"""
+    utc_now = datetime.utcnow()
+    beijing_now = utc_now + timedelta(hours=8)
+    return beijing_now
+
+
+def _get_beijing_today():
+    """获取北京时间今天的日期"""
+    return _get_beijing_now().date()
+
+
 # ============ 普通函数（包含实际逻辑）============
 
 def _save_customer_info_impl(
@@ -50,10 +63,8 @@ def _save_customer_info_impl(
             "updated_at": datetime.now().isoformat()
         }
         
-        # 过滤掉None值
         customer_data = {k: v for k, v in customer_data.items() if v is not None}
         
-        # 检查客户是否已存在（按name + phone组合判断）
         query = client.table("customers").select("id").eq("name", name)
         if phone:
             query = query.eq("phone", phone)
@@ -134,23 +145,18 @@ def _query_customer_info_impl(
 def _get_morning_reminders_impl(ctx=None) -> str:
     """
     上午推送：今天生日 + 满7天及超过7天未联系的客户
-    逻辑：最后联系日期 <= 今天 - 7天
-    去重逻辑：按 name + phone 组合去重（支持同名不同客户）
+    按最后联系日期排序（从早到晚）
     """
     try:
         client = get_supabase_client()
         
-        # 使用北京时间（GitHub Actions 默认是 UTC）
-        from zoneinfo import ZoneInfo
-        beijing_tz = ZoneInfo("Asia/Shanghai")
-        now_beijing = datetime.now(beijing_tz)
-        today = now_beijing.date()
+        # 使用北京时间（UTC+8）
+        today = _get_beijing_today()
         seven_days_ago = today - timedelta(days=7)
         
         birthday_today: List[Dict[str, str]] = []
         no_contact_over_7_days: List[Dict[str, str]] = []
         
-        # 用于去重的集合
         birthday_keys: set = set()
         birthday_grace_period_keys: set = set()
         reminded_keys: set = set()
@@ -213,6 +219,7 @@ def _get_morning_reminders_impl(ctx=None) -> str:
             
             last_contact = customer.get('last_contact_date')
             should_remind = False
+            last_contact_date_obj = None
             
             if not last_contact:
                 should_remind = True
@@ -245,8 +252,18 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                     "company": str(customer.get('company', '')),
                     "position": str(customer.get('position', '')),
                     "phone": phone,
-                    "last_contact_date": last_contact_display
+                    "last_contact_date": last_contact_display,
+                    "last_contact_date_obj": last_contact_date_obj
                 })
+        
+        # 按最后联系日期排序（从早到晚，None放最后）
+        def sort_key(x):
+            date_obj = x.get('last_contact_date_obj')
+            if date_obj is None:
+                return (1, today)  # 从未联系的放最后
+            return (0, date_obj)
+        
+        no_contact_over_7_days.sort(key=sort_key)
         
         # 构建输出
         output_parts: List[str] = []
@@ -280,11 +297,8 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
     try:
         client = get_supabase_client()
         
-        # 使用北京时间（GitHub Actions 默认是 UTC）
-        from zoneinfo import ZoneInfo
-        beijing_tz = ZoneInfo("Asia/Shanghai")
-        now_beijing = datetime.now(beijing_tz)
-        today = now_beijing.date()
+        # 使用北京时间（UTC+8）
+        today = _get_beijing_today()
         tomorrow = today + timedelta(days=1)
         
         contacted_today: List[Dict[str, str]] = []
@@ -377,11 +391,7 @@ def _mark_contacted_impl(name: str, phone: Optional[str] = None, ctx=None) -> st
     try:
         client = get_supabase_client()
         
-        # 使用北京时间
-        from zoneinfo import ZoneInfo
-        beijing_tz = ZoneInfo("Asia/Shanghai")
-        now_beijing = datetime.now(beijing_tz)
-        today = now_beijing.date().isoformat()
+        today = _get_beijing_today().isoformat()
         
         query = client.table("customers").select("id, name, company").eq("name", name)
         if phone:
@@ -397,7 +407,7 @@ def _mark_contacted_impl(name: str, phone: Optional[str] = None, ctx=None) -> st
         
         client.table("customers").update({
             "last_contact_date": today,
-            "updated_at": now_beijing.isoformat()
+            "updated_at": _get_beijing_now().isoformat()
         }).eq("id", customer_id).execute()
         
         return f"✅ 已标记 {name}（{customer.get('company', '未知公司')}）为已联系，7天内不再提醒"
