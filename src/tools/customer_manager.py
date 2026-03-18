@@ -2,7 +2,9 @@
 客户管家工具模块
 - save_customer_info: 保存/更新客户信息
 - query_customer_info: 查询客户信息
-- check_reminders: 检查提醒事项（简洁版）
+- check_reminders: 检查提醒事项
+- get_morning_reminders: 上午推送（今天生日 + 今天跟进）
+- get_afternoon_reminders: 下午推送（今天联系总结 + 明天生日）
 """
 
 from langchain.tools import tool, ToolRuntime
@@ -121,20 +123,17 @@ def _query_customer_info_impl(
         return f"❌ 查询客户信息失败：{str(e)}"
 
 
-def _check_reminders_impl(days_ahead: int = 7, ctx=None) -> str:
-    """检查提醒事项的实际逻辑（简洁版：只显示今天和明天）"""
+def _get_morning_reminders_impl(ctx=None) -> str:
+    """上午推送：今天生日 + 今天跟进"""
     try:
         client = get_supabase_client(ctx)
         
         today = datetime.now().date()
-        tomorrow = today + timedelta(days=1)
         
         birthday_today = []
-        birthday_tomorrow = []
         follow_up_today = []
-        cold_customers = []
         
-        # 1. 检查生日提醒（今天和明天）
+        # 1. 检查今天生日的客户
         birthday_customers = client.table("customers").select("name, birthday, company, position").not_.is_("birthday", "null").execute()
         
         for customer in birthday_customers.data:
@@ -142,65 +141,34 @@ def _check_reminders_impl(days_ahead: int = 7, ctx=None) -> str:
                 birthday_date = datetime.strptime(customer['birthday'], "%Y-%m-%d").date()
                 this_year_birthday = birthday_date.replace(year=today.year)
                 
-                # 检查今天生日
                 if this_year_birthday == today:
                     birthday_today.append({
                         "name": customer['name'],
                         "company": customer.get('company', ''),
                         "position": customer.get('position', '')
                     })
-                # 检查明天生日
-                elif this_year_birthday == tomorrow:
-                    birthday_tomorrow.append({
-                        "name": customer['name'],
-                        "company": customer.get('company', ''),
-                        "position": customer.get('position', '')
-                    })
         
         # 2. 检查今天需要跟进的客户
-        follow_up_customers = client.table("customers").select("*").eq("next_follow_up_date", today.isoformat()).execute()
+        follow_up_customers = client.table("customers").select("name, company, position").eq("next_follow_up_date", today.isoformat()).execute()
         
+        # 去重处理
+        seen_names = set()
         for customer in follow_up_customers.data:
-            follow_up_today.append({
-                "name": customer['name'],
-                "company": customer.get('company', ''),
-                "position": customer.get('position', ''),
-                "notes": customer.get('notes', '')
-            })
-        
-        # 3. 检查超过7天未联系的客户
-        seven_days_ago = (today - timedelta(days=7)).isoformat()
-        cold_customers_data = client.table("customers").select("*").or_(f"last_contact_date.is.null,last_contact_date.lt.{seven_days_ago}").limit(10).execute()
-        
-        for customer in cold_customers_data.data:
-            if customer.get('last_contact_date'):
-                last_date = datetime.strptime(customer['last_contact_date'], "%Y-%m-%d").date()
-                days_passed = (today - last_date).days
-                cold_customers.append({
+            if customer['name'] not in seen_names:
+                seen_names.add(customer['name'])
+                follow_up_today.append({
                     "name": customer['name'],
                     "company": customer.get('company', ''),
-                    "days_passed": days_passed
-                })
-            else:
-                cold_customers.append({
-                    "name": customer['name'],
-                    "company": customer.get('company', ''),
-                    "days_passed": 999  # 从未联系
+                    "position": customer.get('position', '')
                 })
         
-        # 构建简洁的输出
+        # 构建输出
         output_parts = []
         
         # 生日提醒
         if birthday_today:
             output_parts.append("🎂 **今天生日**")
             for customer in birthday_today:
-                output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}")
-            output_parts.append("")
-        
-        if birthday_tomorrow:
-            output_parts.append("🎂 **明天生日**")
-            for customer in birthday_tomorrow:
                 output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}")
             output_parts.append("")
         
@@ -211,14 +179,65 @@ def _check_reminders_impl(days_ahead: int = 7, ctx=None) -> str:
                 output_parts.append(f"• {customer['name']} - {customer['company']}")
             output_parts.append("")
         
-        # 久未联系
-        if cold_customers:
-            output_parts.append("❄️ **超过7天未联系**")
-            for customer in cold_customers[:5]:  # 最多显示5个
-                if customer['days_passed'] == 999:
-                    output_parts.append(f"• {customer['name']} - {customer['company']}（从未联系）")
-                else:
-                    output_parts.append(f"• {customer['name']} - {customer['company']}（{customer['days_passed']}天）")
+        if not output_parts:
+            return "✅ 今日暂无提醒事项"
+        
+        return "\n".join(output_parts)
+        
+    except Exception as e:
+        return f"❌ 检查提醒失败：{str(e)}"
+
+
+def _get_afternoon_reminders_impl(ctx=None) -> str:
+    """下午推送：今天联系总结 + 明天生日"""
+    try:
+        client = get_supabase_client(ctx)
+        
+        today = datetime.now().date()
+        tomorrow = today + timedelta(days=1)
+        
+        contacted_today = []
+        birthday_tomorrow = []
+        
+        # 1. 检查今天已联系的客户（last_contact_date = 今天）
+        contacted_customers = client.table("customers").select("name, company, position").eq("last_contact_date", today.isoformat()).execute()
+        
+        for customer in contacted_customers.data:
+            contacted_today.append({
+                "name": customer['name'],
+                "company": customer.get('company', ''),
+                "position": customer.get('position', '')
+            })
+        
+        # 2. 检查明天生日的客户
+        birthday_customers = client.table("customers").select("name, birthday, company, position").not_.is_("birthday", "null").execute()
+        
+        for customer in birthday_customers.data:
+            if customer['birthday']:
+                birthday_date = datetime.strptime(customer['birthday'], "%Y-%m-%d").date()
+                this_year_birthday = birthday_date.replace(year=today.year)
+                
+                if this_year_birthday == tomorrow:
+                    birthday_tomorrow.append({
+                        "name": customer['name'],
+                        "company": customer.get('company', ''),
+                        "position": customer.get('position', '')
+                    })
+        
+        # 构建输出
+        output_parts = []
+        
+        # 今天联系总结
+        if contacted_today:
+            output_parts.append(f"📊 **今日联系总结**")
+            output_parts.append(f"今天已联系 **{len(contacted_today)}** 位客户")
+            output_parts.append("")
+        
+        # 明天生日提醒
+        if birthday_tomorrow:
+            output_parts.append("🎂 **明天生日**")
+            for customer in birthday_tomorrow:
+                output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}")
             output_parts.append("")
         
         if not output_parts:
@@ -228,6 +247,11 @@ def _check_reminders_impl(days_ahead: int = 7, ctx=None) -> str:
         
     except Exception as e:
         return f"❌ 检查提醒失败：{str(e)}"
+
+
+def _check_reminders_impl(days_ahead: int = 7, ctx=None) -> str:
+    """检查提醒事项的实际逻辑（兼容旧版本）"""
+    return _get_morning_reminders_impl(ctx)
 
 
 # ============ Tool函数（调用普通函数）============
@@ -273,6 +297,6 @@ def query_customer_info(
 
 @tool
 def check_reminders(days_ahead: int = 7, runtime: ToolRuntime = None) -> str:
-    """检查需要提醒的事项（生日、跟进提醒等）"""
+    """检查需要提醒的事项"""
     ctx = runtime.context if runtime else new_context(method="check_reminders")
     return _check_reminders_impl(days_ahead, ctx)
