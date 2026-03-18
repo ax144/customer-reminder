@@ -16,6 +16,8 @@
         "save_customer_info",
         "query_customer_info",
         "check_reminders",
+        "push_morning_reminders",
+        "push_afternoon_reminders",
         "push_reminders_to_feishu",
         "send_custom_message_to_feishu",
         "import_customers_from_excel",
