@@ -187,8 +187,10 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         contacted_keys = set()
         bday_tmr_keys = set()
         
-        # 今天已联系
-        cr = client.table("customers").select("name, company").eq("last_contact_date", today.isoformat()).execute()
+        # 今天已联系 - 使用 gte 和 lt 查询日期范围，兼容不同时间格式
+        today_str = today.isoformat()
+        tomorrow_str = tomorrow.isoformat()
+        cr = client.table("customers").select("name, company").gte("last_contact_date", today_str).lt("last_contact_date", tomorrow_str).execute()
         print(f"[DEBUG] 今天已联系客户数: {len(cr.data)}")
         for c in cr.data:
             name = str(c.get('name', ''))
