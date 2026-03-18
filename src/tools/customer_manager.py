@@ -2,7 +2,7 @@
 客户管家工具模块
 - save_customer_info: 保存/更新客户信息
 - query_customer_info: 查询客户信息
-- check_reminders: 检查提醒事项
+- check_reminders: 检查提醒事项（简洁版）
 """
 
 from langchain.tools import tool, ToolRuntime
@@ -122,85 +122,109 @@ def _query_customer_info_impl(
 
 
 def _check_reminders_impl(days_ahead: int = 7, ctx=None) -> str:
-    """检查提醒事项的实际逻辑"""
+    """检查提醒事项的实际逻辑（简洁版：只显示今天和明天）"""
     try:
         client = get_supabase_client(ctx)
         
         today = datetime.now().date()
-        end_date = today + timedelta(days=days_ahead)
+        tomorrow = today + timedelta(days=1)
         
-        reminders = []
+        birthday_today = []
+        birthday_tomorrow = []
+        follow_up_today = []
+        cold_customers = []
         
-        # 检查生日提醒
+        # 1. 检查生日提醒（今天和明天）
         birthday_customers = client.table("customers").select("name, birthday, company, position").not_.is_("birthday", "null").execute()
         
         for customer in birthday_customers.data:
             if customer['birthday']:
                 birthday_date = datetime.strptime(customer['birthday'], "%Y-%m-%d").date()
                 this_year_birthday = birthday_date.replace(year=today.year)
-                if this_year_birthday < today:
-                    this_year_birthday = birthday_date.replace(year=today.year + 1)
                 
-                if today <= this_year_birthday <= end_date:
-                    days_until = (this_year_birthday - today).days
-                    reminders.append({
-                        "type": "🎂 生日提醒",
-                        "customer": customer['name'],
+                # 检查今天生日
+                if this_year_birthday == today:
+                    birthday_today.append({
+                        "name": customer['name'],
                         "company": customer.get('company', ''),
-                        "date": this_year_birthday.strftime("%Y-%m-%d"),
-                        "days_until": days_until,
-                        "message": f"{customer['name']}的生日还有{days_until}天（{this_year_birthday.strftime('%m月%d日')}）"
+                        "position": customer.get('position', '')
+                    })
+                # 检查明天生日
+                elif this_year_birthday == tomorrow:
+                    birthday_tomorrow.append({
+                        "name": customer['name'],
+                        "company": customer.get('company', ''),
+                        "position": customer.get('position', '')
                     })
         
-        # 检查跟进提醒
-        follow_up_customers = client.table("customers").select("*").gte("next_follow_up_date", today.isoformat()).lte("next_follow_up_date", end_date.isoformat()).execute()
+        # 2. 检查今天需要跟进的客户
+        follow_up_customers = client.table("customers").select("*").eq("next_follow_up_date", today.isoformat()).execute()
         
         for customer in follow_up_customers.data:
-            follow_date = datetime.strptime(customer['next_follow_up_date'], "%Y-%m-%d").date()
-            days_until = (follow_date - today).days
-            reminders.append({
-                "type": "⏰ 跟进提醒",
-                "customer": customer['name'],
+            follow_up_today.append({
+                "name": customer['name'],
                 "company": customer.get('company', ''),
-                "date": customer['next_follow_up_date'],
-                "days_until": days_until,
-                "message": f"需要跟进{customer['name']}（{customer.get('company', '')}），计划日期：{customer['next_follow_up_date']}"
+                "position": customer.get('position', ''),
+                "notes": customer.get('notes', '')
             })
         
-        # 检查久未联系的客户
-        thirty_days_ago = (today - timedelta(days=30)).isoformat()
-        cold_customers = client.table("customers").select("*").or_(f"last_contact_date.is.null,last_contact_date.lt.{thirty_days_ago}").limit(5).execute()
+        # 3. 检查超过7天未联系的客户
+        seven_days_ago = (today - timedelta(days=7)).isoformat()
+        cold_customers_data = client.table("customers").select("*").or_(f"last_contact_date.is.null,last_contact_date.lt.{seven_days_ago}").limit(10).execute()
         
-        for customer in cold_customers.data:
+        for customer in cold_customers_data.data:
             if customer.get('last_contact_date'):
                 last_date = datetime.strptime(customer['last_contact_date'], "%Y-%m-%d").date()
                 days_passed = (today - last_date).days
-                reminders.append({
-                    "type": "❄️ 久未联系",
-                    "customer": customer['name'],
+                cold_customers.append({
+                    "name": customer['name'],
                     "company": customer.get('company', ''),
-                    "date": customer.get('last_contact_date', '未知'),
-                    "days_until": -days_passed,
-                    "message": f"{customer['name']}已{days_passed}天未联系，建议主动关怀"
+                    "days_passed": days_passed
                 })
             else:
-                reminders.append({
-                    "type": "❄️ 从未联系",
-                    "customer": customer['name'],
+                cold_customers.append({
+                    "name": customer['name'],
                     "company": customer.get('company', ''),
-                    "date": "从未联系",
-                    "days_until": -999,
-                    "message": f"{customer['name']}尚未联系过，建议尽快跟进"
+                    "days_passed": 999  # 从未联系
                 })
         
-        if not reminders:
-            return f"✅ 未来{days_ahead}天内暂无提醒事项"
+        # 构建简洁的输出
+        output_parts = []
         
-        output = f"📋 未来{days_ahead}天内有{len(reminders)}项提醒：\n\n"
-        for reminder in sorted(reminders, key=lambda x: x['days_until']):
-            output += f"{reminder['type']}: {reminder['message']}\n"
+        # 生日提醒
+        if birthday_today:
+            output_parts.append("🎂 **今天生日**")
+            for customer in birthday_today:
+                output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}")
+            output_parts.append("")
         
-        return output
+        if birthday_tomorrow:
+            output_parts.append("🎂 **明天生日**")
+            for customer in birthday_tomorrow:
+                output_parts.append(f"• {customer['name']} - {customer['company']} {customer['position']}")
+            output_parts.append("")
+        
+        # 跟进提醒
+        if follow_up_today:
+            output_parts.append("⏰ **今天跟进**")
+            for customer in follow_up_today:
+                output_parts.append(f"• {customer['name']} - {customer['company']}")
+            output_parts.append("")
+        
+        # 久未联系
+        if cold_customers:
+            output_parts.append("❄️ **超过7天未联系**")
+            for customer in cold_customers[:5]:  # 最多显示5个
+                if customer['days_passed'] == 999:
+                    output_parts.append(f"• {customer['name']} - {customer['company']}（从未联系）")
+                else:
+                    output_parts.append(f"• {customer['name']} - {customer['company']}（{customer['days_passed']}天）")
+            output_parts.append("")
+        
+        if not output_parts:
+            return "✅ 今日暂无提醒事项"
+        
+        return "\n".join(output_parts)
         
     except Exception as e:
         return f"❌ 检查提醒失败：{str(e)}"
