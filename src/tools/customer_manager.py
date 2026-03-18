@@ -81,6 +81,7 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         grace_keys = set()
         reminded_keys = set()
         
+        # 查询有生日记录的客户
         result = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
         print(f"[DEBUG] 有生日记录的客户数: {len(result.data)}")
         
@@ -113,6 +114,7 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         
         print(f"[DEBUG] 今天生日人数: {len(birthday_today)}")
         
+        # 查询超过7天未联系
         all_result = client.table("customers").select("name, company, phone, last_contact_date").execute()
         for c in all_result.data:
             name = str(c.get('name', ''))
@@ -145,8 +147,10 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                     except: lcd = str(lc)
                 no_contact_list.append({"name": name, "company": str(c.get('company', '')), "phone": phone, "lc": lcd, "lc_obj": lc_obj})
         
+        # 排序
         no_contact_list.sort(key=lambda x: (1, today) if x.get('lc_obj') is None else (0, x['lc_obj']))
         
+        # 输出
         parts = []
         if birthday_today:
             parts.append("🎂 **今天生日**\n")
@@ -180,6 +184,7 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
         contacted_keys = set()
         bday_tmr_keys = set()
         
+        # 今天已联系
         cr = client.table("customers").select("name, company").eq("last_contact_date", today.isoformat()).execute()
         print(f"[DEBUG] 今天已联系客户数: {len(cr.data)}")
         for c in cr.data:
@@ -189,6 +194,7 @@ def _get_afternoon_reminders_impl(ctx=None) -> str:
                 contacted_keys.add(key)
                 contacted.append({"name": name, "company": str(c.get('company', ''))})
         
+        # 明天生日
         tomorrow_md = tomorrow.strftime('%m-%d')
         print(f"[DEBUG] 明天月日: {tomorrow_md}")
         br = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
