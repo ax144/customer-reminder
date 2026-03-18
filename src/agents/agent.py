@@ -14,7 +14,7 @@ from langchain_core.messages import AnyMessage
 from coze_coding_utils.runtime_ctx.context import default_headers
 
 from storage.memory import get_memory_saver
-from tools.customer_manager import save_customer_info, query_customer_info, check_reminders
+from tools.customer_manager import save_customer_info, query_customer_info, check_reminders, mark_contacted, delete_customer
 from tools.notification_pusher import push_morning_reminders, push_afternoon_reminders, push_reminders_to_feishu, send_custom_message_to_feishu
 
 # 配置文件路径
@@ -64,6 +64,8 @@ def build_agent(ctx=None):
         save_customer_info,
         query_customer_info,
         check_reminders,
+        mark_contacted,
+        delete_customer,
         push_morning_reminders,
         push_afternoon_reminders,
         push_reminders_to_feishu,
