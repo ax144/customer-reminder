@@ -13,11 +13,9 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import AnyMessage
 from coze_coding_utils.runtime_ctx.context import default_headers
 
-from src.storage.memory.memory_saver import get_memory_saver
-from src.tools.customer_manager import save_customer_info, query_customer_info, check_reminders
-from src.tools.notification_pusher import push_morning_reminders, push_afternoon_reminders, push_reminders_to_feishu, send_custom_message_to_feishu
-from src.tools.batch_import import import_customers_from_excel, get_import_template
-from src.tools.web_search_tool import web_search
+from storage.memory import get_memory_saver
+from tools.customer_manager import save_customer_info, query_customer_info, check_reminders
+from tools.notification_pusher import push_morning_reminders, push_afternoon_reminders, push_reminders_to_feishu, send_custom_message_to_feishu
 
 # 配置文件路径
 LLM_CONFIG = "config/agent_llm_config.json"
@@ -69,10 +67,7 @@ def build_agent(ctx=None):
         push_morning_reminders,
         push_afternoon_reminders,
         push_reminders_to_feishu,
-        send_custom_message_to_feishu,
-        import_customers_from_excel,
-        get_import_template,
-        web_search
+        send_custom_message_to_feishu
     ]
     
     # 创建并返回Agent
