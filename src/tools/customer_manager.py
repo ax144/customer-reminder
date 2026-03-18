@@ -89,17 +89,20 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         print(f"[DEBUG] 今天月日: {today_md}")
         
         for c in result.data:
+            name = str(c.get('name', ''))
             if c.get('birthday'):
                 try:
                     bs = str(c['birthday'])
                     if 'T' in bs: bs = bs.split('T')[0]
                     cmd = bs[5:10] if len(bs) >= 5 else ""
-                    name = str(c.get('name', ''))
                     phone = str(c.get('phone', ''))
                     key = f"{name}_{phone}"
                     
+                    # 打印每个人的生日匹配情况
+                    print(f"[DEBUG] {name}: birthday={bs}, cmd={cmd}, today={today_md}, match={cmd==today_md}")
+                    
                     if cmd == today_md:
-                        print(f"[DEBUG] 找到今天生日: {name}")
+                        print(f"[DEBUG] ⭐ 找到今天生日: {name}")
                         if key not in birthday_keys:
                             birthday_keys.add(key)
                             birthday_today.append({"name": name, "company": str(c.get('company', '')), "position": str(c.get('position', '')), "phone": phone})
@@ -110,7 +113,7 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                     if 0 <= dsb <= 2:
                         grace_keys.add(key)
                 except Exception as ex:
-                    print(f"[DEBUG] 生日解析错误: {ex}")
+                    print(f"[DEBUG] 生日解析错误: {name} - {ex}")
         
         print(f"[DEBUG] 今天生日人数: {len(birthday_today)}")
         
