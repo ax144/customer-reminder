@@ -14,8 +14,14 @@ from langchain_core.messages import AnyMessage
 from coze_coding_utils.runtime_ctx.context import default_headers
 
 from storage.memory import get_memory_saver
-from tools.customer_manager import save_customer_info, query_customer_info, check_reminders, mark_contacted, delete_customer
-from tools.notification_pusher import push_morning_reminders, push_afternoon_reminders, push_reminders_to_feishu, send_custom_message_to_feishu
+from tools.customer_manager import (
+    save_customer, query_customer, get_reminders, 
+    mark_contacted, delete_customer, update_project_progress
+)
+from tools.notification_pusher import (
+    push_reminders, push_morning_reminders, 
+    push_afternoon_reminders, send_custom_message_to_feishu
+)
 
 # 配置文件路径
 LLM_CONFIG = "config/agent_llm_config.json"
@@ -61,14 +67,15 @@ def build_agent(ctx=None):
     
     # 注册所有工具
     tools = [
-        save_customer_info,
-        query_customer_info,
-        check_reminders,
+        save_customer,
+        query_customer,
+        get_reminders,
         mark_contacted,
         delete_customer,
+        update_project_progress,
+        push_reminders,
         push_morning_reminders,
         push_afternoon_reminders,
-        push_reminders_to_feishu,
         send_custom_message_to_feishu
     ]
     
