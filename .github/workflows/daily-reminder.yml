@@ -2,21 +2,9 @@ name: Daily Customer Reminder
 
 on:
   schedule:
-    # 早上8:45推送 (北京时间8:45 = UTC 0:45)
+    # 每天早上8:45推送 (北京时间8:45 = UTC 0:45)
     - cron: '45 0 * * *'
-    # 下午16:45推送 (北京时间16:45 = UTC 8:45)
-    - cron: '45 8 * * *'
   workflow_dispatch:  # 支持手动触发
-    inputs:
-      mode:
-        description: '推送模式：morning（上午）、afternoon（下午）、both（两者）'
-        required: true
-        default: 'both'
-        type: choice
-        options:
-          - morning
-          - afternoon
-          - both
 
 jobs:
   push-reminder:
@@ -36,38 +24,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Run morning reminder
-      if: github.event.schedule == '45 0 * * *'
+    - name: Push customer reminders
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        COZE_WORKLOAD_IDENTITY_API_KEY: ${{ secrets.COZE_WORKLOAD_IDENTITY_API_KEY }}
-        COZE_INTEGRATION_MODEL_BASE_URL: ${{ secrets.COZE_INTEGRATION_MODEL_BASE_URL }}
-        PUSH_MODE: morning
-      run: |
-        python scripts/push_reminder.py
-    
-    - name: Run afternoon reminder
-      if: github.event.schedule == '45 8 * * *'
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        COZE_WORKLOAD_IDENTITY_API_KEY: ${{ secrets.COZE_WORKLOAD_IDENTITY_API_KEY }}
-        COZE_INTEGRATION_MODEL_BASE_URL: ${{ secrets.COZE_INTEGRATION_MODEL_BASE_URL }}
-        PUSH_MODE: afternoon
-      run: |
-        python scripts/push_reminder.py
-    
-    - name: Run manual reminder
-      if: github.event_name == 'workflow_dispatch'
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        COZE_WORKLOAD_IDENTITY_API_KEY: ${{ secrets.COZE_WORKLOAD_IDENTITY_API_KEY }}
-        COZE_INTEGRATION_MODEL_BASE_URL: ${{ secrets.COZE_INTEGRATION_MODEL_BASE_URL }}
-        PUSH_MODE: ${{ github.event.inputs.mode }}
       run: |
         python scripts/push_reminder.py
