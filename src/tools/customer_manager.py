@@ -1,12 +1,13 @@
 """
 客户管家工具模块
+适配新的客户资源表结构
 """
 
 from langchain.tools import tool, ToolRuntime
 from coze_coding_utils.runtime_ctx.context import new_context
 from storage.database.supabase_client import get_supabase_client
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, cast
+from typing import Optional, List, Dict, Any
 
 
 def _get_beijing_now():
@@ -18,55 +19,110 @@ def _get_beijing_today():
     return _get_beijing_now().date()
 
 
-def _save_customer_info_impl(name: str, company: Optional[str] = None, position: Optional[str] = None,
-    phone: Optional[str] = None, email: Optional[str] = None, wechat: Optional[str] = None,
-    birthday: Optional[str] = None, source: Optional[str] = None, notes: Optional[str] = None,
-    last_contact_date: Optional[str] = None, next_follow_up_date: Optional[str] = None,
-    relationship_strength: Optional[str] = None, ctx=None) -> str:
+# ============ 普通函数（包含实际逻辑）============
+
+def _save_customer_impl(
+    name: str,
+    company: Optional[str] = None,
+    position: Optional[str] = None,
+    referrer: Optional[str] = None,
+    direct_project: Optional[str] = None,
+    project_progress_1: Optional[str] = None,
+    extended_project: Optional[str] = None,
+    project_progress_2: Optional[str] = None,
+    others: Optional[str] = None,
+    last_contact_date: Optional[str] = None,
+    ctx=None
+) -> str:
+    """保存或更新客户信息"""
     try:
         client = get_supabase_client()
-        customer_data: Dict[str, Any] = {"name": name, "company": company, "position": position,
-            "phone": phone, "email": email, "wechat": wechat, "birthday": birthday, "source": source,
-            "notes": notes, "last_contact_date": last_contact_date, "next_follow_up_date": next_follow_up_date,
-            "relationship_strength": relationship_strength, "updated_at": datetime.now().isoformat()}
+        
+        customer_data: Dict[str, Any] = {
+            "name": name,
+            "company": company,
+            "position": position,
+            "referrer": referrer,
+            "direct_project": direct_project,
+            "project_progress_1": project_progress_1,
+            "extended_project": extended_project,
+            "project_progress_2": project_progress_2,
+            "others": others,
+            "last_contact_date": last_contact_date,
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        # 移除 None 值
         customer_data = {k: v for k, v in customer_data.items() if v is not None}
+        
+        # 检查是否已存在（按姓名+公司去重）
         query = client.table("customers").select("id").eq("name", name)
-        if phone: query = query.eq("phone", phone)
+        if company:
+            query = query.eq("company", company)
+        
         existing = query.execute()
+        
         if existing.data:
+            # 更新
             client.table("customers").update(customer_data).eq("id", existing.data[0]["id"]).execute()
             return f"✅ 客户信息已更新：{name}"
-        customer_data["created_at"] = datetime.now().isoformat()
-        result = client.table("customers").insert(customer_data).execute()
-        return f"✅ 新客户已保存：{name}"
+        else:
+            # 新增
+            customer_data["created_at"] = datetime.now().isoformat()
+            result = client.table("customers").insert(customer_data).execute()
+            return f"✅ 新客户已保存：{name}"
+            
     except Exception as e:
         return f"❌ 保存失败：{str(e)}"
 
 
-def _query_customer_info_impl(name: Optional[str] = None, company: Optional[str] = None,
-    position: Optional[str] = None, relationship_strength: Optional[str] = None,
-    limit: int = 10, ctx=None) -> str:
+def _query_customer_impl(
+    name: Optional[str] = None,
+    company: Optional[str] = None,
+    position: Optional[str] = None,
+    limit: int = 10,
+    ctx=None
+) -> str:
+    """查询客户信息"""
     try:
         client = get_supabase_client()
+        
         query = client.table("customers").select("*")
-        if name: query = query.ilike("name", f"%{name}%")
-        if company: query = query.ilike("company", f"%{company}%")
-        if position: query = query.ilike("position", f"%{position}%")
-        if relationship_strength: query = query.eq("relationship_strength", relationship_strength)
+        
+        if name:
+            query = query.ilike("name", f"%{name}%")
+        if company:
+            query = query.ilike("company", f"%{company}%")
+        if position:
+            query = query.ilike("position", f"%{position}%")
+        
         result = query.limit(limit).order("updated_at", desc=True).execute()
-        if not result.data: return "📭 未找到匹配的客户信息"
+        
+        if not result.data:
+            return "📭 未找到匹配的客户信息"
+        
         output = f"📋 找到 {len(result.data)} 条客户记录：\n\n"
+        
         for i, c in enumerate(result.data, 1):
             output += f"**{i}. {c.get('name', '')}**\n"
-            if c.get('company'): output += f"   🏢 {c['company']}\n"
-            if c.get('phone'): output += f"   📞 {c['phone']}\n"
+            if c.get('company'):
+                output += f"   🏢 {c['company']}\n"
+            if c.get('position'):
+                output += f"   💼 {c['position']}\n"
+            if c.get('direct_project'):
+                output += f"   📌 直推项目: {c['direct_project']}\n"
+            if c.get('last_contact_date'):
+                output += f"   📅 最后联系: {c['last_contact_date']}\n"
             output += "\n"
+        
         return output
+        
     except Exception as e:
         return f"❌ 查询失败：{str(e)}"
 
 
-def _get_morning_reminders_impl(ctx=None) -> str:
+def _get_reminders_impl(ctx=None) -> str:
+    """获取提醒事项（满7天及超过7天未联系的客户）"""
     try:
         client = get_supabase_client()
         today = _get_beijing_today()
@@ -75,69 +131,41 @@ def _get_morning_reminders_impl(ctx=None) -> str:
         print(f"[DEBUG] 北京时间今天: {today}")
         print(f"[DEBUG] 7天前: {seven_days_ago}")
         
-        birthday_today = []
         no_contact_list = []
-        birthday_keys = set()
-        grace_keys = set()
         reminded_keys = set()
         
-        # 查询有生日记录的客户
-        result = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
-        print(f"[DEBUG] 有生日记录的客户数: {len(result.data)}")
+        # 查询所有客户（新表结构）
+        all_result = client.table("customers").select(
+            "id, name, company, position, direct_project, project_progress_1, last_contact_date"
+        ).execute()
         
-        today_md = today.strftime('%m-%d')
-        print(f"[DEBUG] 今天月日: {today_md}")
+        print(f"[DEBUG] 总客户数: {len(all_result.data)}")
         
-        for c in result.data:
-            name = str(c.get('name', ''))
-            if c.get('birthday'):
-                try:
-                    bs = str(c['birthday'])
-                    if 'T' in bs: bs = bs.split('T')[0]
-                    cmd = bs[5:10] if len(bs) >= 5 else ""
-                    phone = str(c.get('phone', ''))
-                    key = f"{name}_{phone}"
-                    
-                    # 打印每个人的生日匹配情况
-                    print(f"[DEBUG] {name}: birthday={bs}, cmd={cmd}, today={today_md}, match={cmd==today_md}")
-                    
-                    if cmd == today_md:
-                        print(f"[DEBUG] ⭐ 找到今天生日: {name}")
-                        if key not in birthday_keys:
-                            birthday_keys.add(key)
-                            birthday_today.append({"name": name, "company": str(c.get('company', '')), "position": str(c.get('position', '')), "phone": phone})
-                    
-                    bd = datetime.strptime(bs, "%Y-%m-%d").date()
-                    tyb = bd.replace(year=today.year)
-                    dsb = (today - tyb).days
-                    if 0 <= dsb <= 2:
-                        grace_keys.add(key)
-                except Exception as ex:
-                    print(f"[DEBUG] 生日解析错误: {name} - {ex}")
-        
-        print(f"[DEBUG] 今天生日人数: {len(birthday_today)}")
-        
-        # 查询超过7天未联系
-        all_result = client.table("customers").select("name, company, phone, last_contact_date").execute()
         for c in all_result.data:
             name = str(c.get('name', ''))
-            phone = str(c.get('phone', ''))
-            if not name: continue
-            key = f"{name}_{phone}"
-            if key in reminded_keys or key in birthday_keys or key in grace_keys: continue
+            if not name:
+                continue
+            
+            key = f"{name}_{c.get('company', '')}"
+            if key in reminded_keys:
+                continue
             
             lc = c.get('last_contact_date')
             remind = False
             lc_obj = None
+            
             if not lc:
                 remind = True
             else:
                 try:
                     lcs = str(lc)
-                    if 'T' in lcs: lcs = lcs.split('T')[0]
+                    if 'T' in lcs:
+                        lcs = lcs.split('T')[0]
                     lc_obj = datetime.strptime(lcs, "%Y-%m-%d").date()
-                    if lc_obj <= seven_days_ago: remind = True
-                except: remind = True
+                    if lc_obj <= seven_days_ago:
+                        remind = True
+                except:
+                    remind = True
             
             if remind:
                 reminded_keys.add(key)
@@ -145,165 +173,193 @@ def _get_morning_reminders_impl(ctx=None) -> str:
                 if lc:
                     try:
                         lcs = str(lc)
-                        if 'T' in lcs: lcs = lcs.split('T')[0]
+                        if 'T' in lcs:
+                            lcs = lcs.split('T')[0]
                         lcd = lcs
-                    except: lcd = str(lc)
-                no_contact_list.append({"name": name, "company": str(c.get('company', '')), "phone": phone, "lc": lcd, "lc_obj": lc_obj})
+                    except:
+                        lcd = str(lc)
+                
+                no_contact_list.append({
+                    "name": name,
+                    "company": str(c.get('company', '')),
+                    "position": str(c.get('position', '')),
+                    "direct_project": str(c.get('direct_project', '')),
+                    "project_progress_1": str(c.get('project_progress_1', '')),
+                    "lc": lcd,
+                    "lc_obj": lc_obj
+                })
         
-        # 排序
-        no_contact_list.sort(key=lambda x: (1, today) if x.get('lc_obj') is None else (0, x['lc_obj']))
+        # 排序：按最后联系时间升序（最久未联系的排前面）
+        no_contact_list.sort(
+            key=lambda x: (1, today) if x.get('lc_obj') is None else (0, x['lc_obj'])
+        )
         
         # 输出
         parts = []
-        if birthday_today:
-            parts.append("🎂 **今天生日**\n")
-            for c in birthday_today:
-                ps = f" 📞{c['phone']}" if c.get('phone') else ""
-                parts.append(f"• {c['name']} - {c['company']} {c['position']}{ps}")
-            parts.append("\n")
         
         if no_contact_list:
             parts.append(f"⏰ **满7天及超过7天未联系** (共{len(no_contact_list)}人)\n")
             for c in no_contact_list:
-                ps = f" 📞{c['phone']}" if c.get('phone') else ""
+                # 项目推进（显示项目进展）
+                progress = c.get('project_progress_1', '') if c.get('project_progress_1') else ''
+                proj_info = f"【项目推进：{progress}】" if progress else ""
                 ls = f"（最后联系：{c['lc']}）" if c['lc'] else "（从未联系）"
-                parts.append(f"• {c['name']} - {c['company']}{ps} {ls}")
+                parts.append(f"• **{c['name']}** - {c['company']} {proj_info} {ls}")
         
         return "\n".join(parts) if parts else "✅ 今日暂无提醒事项"
+        
     except Exception as e:
         return f"❌ 检查提醒失败：{str(e)}"
 
 
-def _get_afternoon_reminders_impl(ctx=None) -> str:
+def _mark_contacted_impl(name: str, company: Optional[str] = None, ctx=None) -> str:
+    """标记客户为已联系"""
     try:
         client = get_supabase_client()
-        today = _get_beijing_today()
-        tomorrow = today + timedelta(days=1)
         
-        print(f"[DEBUG] 下午推送 - 今天: {today}, 明天: {tomorrow}")
-        
-        contacted = []
-        bday_tmr = []
-        contacted_keys = set()
-        bday_tmr_keys = set()
-        
-        # 今天已联系 - 使用 gte 和 lt 查询日期范围，兼容不同时间格式
-        today_str = today.isoformat()
-        tomorrow_str = tomorrow.isoformat()
-        cr = client.table("customers").select("name, company").gte("last_contact_date", today_str).lt("last_contact_date", tomorrow_str).execute()
-        print(f"[DEBUG] 今天已联系客户数: {len(cr.data)}")
-        for c in cr.data:
-            name = str(c.get('name', ''))
-            key = f"{name}_{c.get('phone', '')}"
-            if key not in contacted_keys:
-                contacted_keys.add(key)
-                contacted.append({"name": name, "company": str(c.get('company', ''))})
-        
-        # 明天生日
-        tomorrow_md = tomorrow.strftime('%m-%d')
-        print(f"[DEBUG] 明天月日: {tomorrow_md}")
-        br = client.table("customers").select("name, birthday, company, position, phone").not_.is_("birthday", "null").execute()
-        for c in br.data:
-            if c.get('birthday'):
-                try:
-                    bs = str(c['birthday'])
-                    if 'T' in bs: bs = bs.split('T')[0]
-                    cmd = bs[5:10] if len(bs) >= 5 else ""
-                    if cmd == tomorrow_md:
-                        name = str(c.get('name', ''))
-                        phone = str(c.get('phone', ''))
-                        key = f"{name}_{phone}"
-                        if key not in bday_tmr_keys:
-                            print(f"[DEBUG] 找到明天生日: {name}")
-                            bday_tmr_keys.add(key)
-                            bday_tmr.append({"name": name, "company": str(c.get('company', '')), "position": str(c.get('position', '')), "phone": phone})
-                except: pass
-        
-        print(f"[DEBUG] 明天生日人数: {len(bday_tmr)}")
-        
-        parts = []
-        if contacted:
-            parts.append("📊 **今日已联系客户**\n")
-            for c in contacted: parts.append(f"• {c['name']} - {c['company']}")
-            parts.append(f"\n✅ 今天已联系 **{len(contacted)}** 位客户\n")
-        
-        if bday_tmr:
-            parts.append("🎂 **明天生日**\n")
-            for c in bday_tmr:
-                ps = f" 📞{c['phone']}" if c.get('phone') else ""
-                parts.append(f"• {c['name']} - {c['company']} {c['position']}{ps}")
-        
-        return "\n".join(parts) if parts else "✅ 今日暂无提醒事项"
-    except Exception as e:
-        return f"❌ 检查失败：{str(e)}"
-
-
-def _check_reminders_impl(days_ahead: int = 7, ctx=None) -> str:
-    return _get_morning_reminders_impl(ctx)
-
-
-def _mark_contacted_impl(name: str, phone: Optional[str] = None, ctx=None) -> str:
-    try:
-        client = get_supabase_client()
         query = client.table("customers").select("id, name, company").eq("name", name)
-        if phone: query = query.eq("phone", phone)
+        if company:
+            query = query.eq("company", company)
+        
         result = query.execute()
-        if not result.data: return f"❌ 未找到客户：{name}"
-        client.table("customers").update({"last_contact_date": _get_beijing_today().isoformat(), "updated_at": _get_beijing_now().isoformat()}).eq("id", result.data[0]["id"]).execute()
+        
+        if not result.data:
+            return f"❌ 未找到客户：{name}"
+        
+        client.table("customers").update({
+            "last_contact_date": _get_beijing_today().isoformat(),
+            "updated_at": _get_beijing_now().isoformat()
+        }).eq("id", result.data[0]["id"]).execute()
+        
         return f"✅ 已标记 {name} 为已联系"
+        
     except Exception as e:
         return f"❌ 标记失败：{str(e)}"
 
 
-def _delete_customer_impl(name: str, phone: Optional[str] = None, reason: Optional[str] = None, ctx=None) -> str:
+def _delete_customer_impl(name: str, company: Optional[str] = None, ctx=None) -> str:
+    """删除客户"""
     try:
         client = get_supabase_client()
+        
         query = client.table("customers").select("id").eq("name", name)
-        if phone: query = query.eq("phone", phone)
+        if company:
+            query = query.eq("company", company)
+        
         result = query.execute()
-        if not result.data: return f"❌ 未找到客户：{name}"
+        
+        if not result.data:
+            return f"❌ 未找到客户：{name}"
+        
         client.table("customers").delete().eq("id", result.data[0]["id"]).execute()
+        
         return f"✅ 已删除客户：{name}"
+        
     except Exception as e:
         return f"❌ 删除失败：{str(e)}"
 
 
+def _update_project_progress_impl(
+    name: str,
+    project_progress_1: Optional[str] = None,
+    project_progress_2: Optional[str] = None,
+    company: Optional[str] = None,
+    ctx=None
+) -> str:
+    """更新项目进展"""
+    try:
+        client = get_supabase_client()
+        
+        query = client.table("customers").select("id, name").eq("name", name)
+        if company:
+            query = query.eq("company", company)
+        
+        result = query.execute()
+        
+        if not result.data:
+            return f"❌ 未找到客户：{name}"
+        
+        update_data = {"updated_at": datetime.now().isoformat()}
+        if project_progress_1:
+            update_data["project_progress_1"] = project_progress_1
+        if project_progress_2:
+            update_data["project_progress_2"] = project_progress_2
+        
+        client.table("customers").update(update_data).eq("id", result.data[0]["id"]).execute()
+        
+        return f"✅ 已更新 {name} 的项目进展"
+        
+    except Exception as e:
+        return f"❌ 更新失败：{str(e)}"
+
+
+# ============ Tool函数 ============
+
 @tool
-def save_customer_info(name: str, company: Optional[str] = None, position: Optional[str] = None,
-    phone: Optional[str] = None, email: Optional[str] = None, wechat: Optional[str] = None,
-    birthday: Optional[str] = None, source: Optional[str] = None, notes: Optional[str] = None,
-    last_contact_date: Optional[str] = None, next_follow_up_date: Optional[str] = None,
-    relationship_strength: Optional[str] = None, runtime: ToolRuntime = None) -> str:
+def save_customer(
+    name: str,
+    company: Optional[str] = None,
+    position: Optional[str] = None,
+    referrer: Optional[str] = None,
+    direct_project: Optional[str] = None,
+    project_progress_1: Optional[str] = None,
+    extended_project: Optional[str] = None,
+    project_progress_2: Optional[str] = None,
+    others: Optional[str] = None,
+    last_contact_date: Optional[str] = None,
+    runtime: ToolRuntime = None
+) -> str:
     """保存或更新客户信息"""
-    ctx = runtime.context if runtime else new_context(method="save_customer_info")
-    return _save_customer_info_impl(name, company, position, phone, email, wechat, birthday, source, notes, last_contact_date, next_follow_up_date, relationship_strength, ctx)
+    ctx = runtime.context if runtime else new_context(method="save_customer")
+    return _save_customer_impl(
+        name, company, position, referrer, direct_project,
+        project_progress_1, extended_project, project_progress_2,
+        others, last_contact_date, ctx
+    )
 
 
 @tool
-def query_customer_info(name: Optional[str] = None, company: Optional[str] = None,
-    position: Optional[str] = None, relationship_strength: Optional[str] = None,
-    limit: int = 10, runtime: ToolRuntime = None) -> str:
+def query_customer(
+    name: Optional[str] = None,
+    company: Optional[str] = None,
+    position: Optional[str] = None,
+    limit: int = 10,
+    runtime: ToolRuntime = None
+) -> str:
     """查询客户信息"""
-    ctx = runtime.context if runtime else new_context(method="query_customer_info")
-    return _query_customer_info_impl(name, company, position, relationship_strength, limit, ctx)
+    ctx = runtime.context if runtime else new_context(method="query_customer")
+    return _query_customer_impl(name, company, position, limit, ctx)
 
 
 @tool
-def check_reminders(days_ahead: int = 7, runtime: ToolRuntime = None) -> str:
-    """检查需要提醒的事项"""
-    ctx = runtime.context if runtime else new_context(method="check_reminders")
-    return _check_reminders_impl(days_ahead, ctx)
+def get_reminders(runtime: ToolRuntime = None) -> str:
+    """获取未联系客户提醒（满7天及超过7天未联系）"""
+    ctx = runtime.context if runtime else new_context(method="get_reminders")
+    return _get_reminders_impl(ctx)
 
 
 @tool
-def mark_contacted(name: str, phone: Optional[str] = None, runtime: ToolRuntime = None) -> str:
+def mark_contacted(name: str, company: Optional[str] = None, runtime: ToolRuntime = None) -> str:
     """标记客户为已联系"""
     ctx = runtime.context if runtime else new_context(method="mark_contacted")
-    return _mark_contacted_impl(name, phone, ctx)
+    return _mark_contacted_impl(name, company, ctx)
 
 
 @tool
-def delete_customer(name: str, phone: Optional[str] = None, reason: Optional[str] = None, runtime: ToolRuntime = None) -> str:
+def delete_customer(name: str, company: Optional[str] = None, runtime: ToolRuntime = None) -> str:
     """删除客户"""
     ctx = runtime.context if runtime else new_context(method="delete_customer")
-    return _delete_customer_impl(name, phone, reason, ctx)
+    return _delete_customer_impl(name, company, ctx)
+
+
+@tool
+def update_project_progress(
+    name: str,
+    project_progress_1: Optional[str] = None,
+    project_progress_2: Optional[str] = None,
+    company: Optional[str] = None,
+    runtime: ToolRuntime = None
+) -> str:
+    """更新客户项目进展"""
+    ctx = runtime.context if runtime else new_context(method="update_project_progress")
+    return _update_project_progress_impl(name, project_progress_1, project_progress_2, company, ctx)
