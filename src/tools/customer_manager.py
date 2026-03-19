@@ -212,6 +212,42 @@ def _get_reminders_impl(ctx=None) -> str:
         return f"❌ 检查提醒失败：{str(e)}"
 
 
+def _get_today_contacted_impl(ctx=None) -> str:
+    """获取今日已联系的客户"""
+    try:
+        client = get_supabase_client()
+        today = _get_beijing_today()
+        
+        print(f"[DEBUG] 下午推送 - 今天: {today}")
+        
+        # 查询今天已联系的客户
+        today_str = today.isoformat()
+        tomorrow_str = (today + timedelta(days=1)).isoformat()
+        
+        result = client.table("customers").select(
+            "id, name, company, position, direct_project, project_progress_1, last_contact_date"
+        ).gte("last_contact_date", today_str).lt("last_contact_date", tomorrow_str).execute()
+        
+        print(f"[DEBUG] 今天已联系客户数: {len(result.data)}")
+        
+        if not result.data:
+            return "📊 **今日联系总结**\n\n📭 今天还没有联系客户记录\n\n💡 建议：尽快联系满7天未跟进的客户"
+        
+        parts = []
+        parts.append(f"📊 **今日联系总结**\n")
+        parts.append(f"✅ 今天已联系 **{len(result.data)}** 位客户\n")
+        
+        for c in result.data:
+            progress = c.get('project_progress_1', '') if c.get('project_progress_1') else ''
+            proj_info = f"【项目推进：{progress}】" if progress else ""
+            parts.append(f"• **{c.get('name', '')}** - {c.get('company', '')} {proj_info}")
+        
+        return "\n".join(parts)
+        
+    except Exception as e:
+        return f"❌ 获取今日联系记录失败：{str(e)}"
+
+
 def _mark_contacted_impl(name: str, company: Optional[str] = None, ctx=None) -> str:
     """标记客户为已联系"""
     try:
