@@ -36,14 +36,38 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Run reminder script
+    - name: Run morning reminder
+      if: github.event.schedule == '45 0 * * *'
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
         COZE_WORKLOAD_IDENTITY_API_KEY: ${{ secrets.COZE_WORKLOAD_IDENTITY_API_KEY }}
         COZE_INTEGRATION_MODEL_BASE_URL: ${{ secrets.COZE_INTEGRATION_MODEL_BASE_URL }}
-        # 手动触发时传入模式参数
+        PUSH_MODE: morning
+      run: |
+        python scripts/push_reminder.py
+    
+    - name: Run afternoon reminder
+      if: github.event.schedule == '45 8 * * *'
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        COZE_WORKLOAD_IDENTITY_API_KEY: ${{ secrets.COZE_WORKLOAD_IDENTITY_API_KEY }}
+        COZE_INTEGRATION_MODEL_BASE_URL: ${{ secrets.COZE_INTEGRATION_MODEL_BASE_URL }}
+        PUSH_MODE: afternoon
+      run: |
+        python scripts/push_reminder.py
+    
+    - name: Run manual reminder
+      if: github.event_name == 'workflow_dispatch'
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        COZE_WORKLOAD_IDENTITY_API_KEY: ${{ secrets.COZE_WORKLOAD_IDENTITY_API_KEY }}
+        COZE_INTEGRATION_MODEL_BASE_URL: ${{ secrets.COZE_INTEGRATION_MODEL_BASE_URL }}
         PUSH_MODE: ${{ github.event.inputs.mode }}
       run: |
         python scripts/push_reminder.py
