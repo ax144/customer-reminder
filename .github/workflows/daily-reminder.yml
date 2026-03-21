@@ -1,14 +1,29 @@
 name: Daily Customer Reminder
 
 on:
+  # 支持外部触发（cron-job.org 等）
+  repository_dispatch:
+    types:
+      - morning_reminder
+      - afternoon_reminder
+  
+  # GitHub 定时任务（多个时间点，防重复逻辑在代码中）
   schedule:
-    # 上午推送 (目标北京时间8:45，设置UTC 0:00=北京时间8:00)
-    # GitHub延迟约0-2小时，实际执行时间约北京时间8:00-10:00
-    - cron: '0 0 * * *'
-    # 下午推送 (目标北京时间17:00，设置UTC 9:00=北京时间17:00)
-    # GitHub延迟约0-2小时，实际执行时间约北京时间17:00-19:00
-    - cron: '0 9 * * *'
-  workflow_dispatch:  # 支持手动触发
+    # 上午推送：北京时间 7:00 - 9:00
+    - cron: '0 23 * * *'   # 北京时间 7:00
+    - cron: '30 23 * * *'  # 北京时间 7:30
+    - cron: '0 0 * * *'    # 北京时间 8:00
+    - cron: '30 0 * * *'   # 北京时间 8:30
+    - cron: '0 1 * * *'    # 北京时间 9:00
+    # 下午推送：北京时间 16:00 - 18:00
+    - cron: '0 8 * * *'    # 北京时间 16:00
+    - cron: '30 8 * * *'   # 北京时间 16:30
+    - cron: '0 9 * * *'    # 北京时间 17:00
+    - cron: '30 9 * * *'   # 北京时间 17:30
+    - cron: '0 10 * * *'   # 北京时间 18:00
+  
+  # 支持手动触发
+  workflow_dispatch:
     inputs:
       mode:
         description: '推送模式：morning（上午）、afternoon（下午）'
@@ -37,32 +52,28 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Run morning reminder
-      if: github.event.schedule == '0 0 * * *'
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        PUSH_MODE: morning
+    - name: Determine push mode
+      id: mode
       run: |
-        python scripts/push_reminder.py
+        if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+          if [ "${{ github.event.action }}" = "morning_reminder" ]; then
+            echo "mode=morning" >> $GITHUB_OUTPUT
+          else
+            echo "mode=afternoon" >> $GITHUB_OUTPUT
+          fi
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+        elif [ "${{ github.event.schedule }}" = "0 23 * * *" ] || [ "${{ github.event.schedule }}" = "30 23 * * *" ] || [ "${{ github.event.schedule }}" = "0 0 * * *" ] || [ "${{ github.event.schedule }}" = "30 0 * * *" ] || [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
+          echo "mode=morning" >> $GITHUB_OUTPUT
+        else
+          echo "mode=afternoon" >> $GITHUB_OUTPUT
+        fi
     
-    - name: Run afternoon reminder
-      if: github.event.schedule == '0 9 * * *'
+    - name: Run reminder
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        PUSH_MODE: afternoon
-      run: |
-        python scripts/push_reminder.py
-    
-    - name: Run manual reminder
-      if: github.event_name == 'workflow_dispatch'
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        PUSH_MODE: ${{ github.event.inputs.mode }}
+        PUSH_MODE: ${{ steps.mode.outputs.mode }}
       run: |
         python scripts/push_reminder.py
