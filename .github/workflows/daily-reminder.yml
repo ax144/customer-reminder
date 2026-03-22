@@ -1,28 +1,21 @@
 name: Daily Customer Reminder
 
 on:
-  # 支持外部触发（cron-job.org 等）
   repository_dispatch:
     types:
       - morning_reminder
       - afternoon_reminder
   
-  # GitHub 定时任务（多个时间点，防重复逻辑在代码中）
   schedule:
-    # 上午推送：北京时间 7:00 - 9:00
-    - cron: '0 23 * * *'   # 北京时间 7:00
-    - cron: '30 23 * * *'  # 北京时间 7:30
+    # 上午推送：北京时间 8:00 - 9:00
     - cron: '0 0 * * *'    # 北京时间 8:00
     - cron: '30 0 * * *'   # 北京时间 8:30
     - cron: '0 1 * * *'    # 北京时间 9:00
-    # 下午推送：北京时间 16:00 - 18:00
-    - cron: '0 8 * * *'    # 北京时间 16:00
-    - cron: '30 8 * * *'   # 北京时间 16:30
+    # 下午推送：北京时间 17:00 - 18:00
     - cron: '0 9 * * *'    # 北京时间 17:00
     - cron: '30 9 * * *'   # 北京时间 17:30
     - cron: '0 10 * * *'   # 北京时间 18:00
   
-  # 支持手动触发
   workflow_dispatch:
     inputs:
       mode:
@@ -63,7 +56,7 @@ jobs:
           fi
         elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
-        elif [ "${{ github.event.schedule }}" = "0 23 * * *" ] || [ "${{ github.event.schedule }}" = "30 23 * * *" ] || [ "${{ github.event.schedule }}" = "0 0 * * *" ] || [ "${{ github.event.schedule }}" = "30 0 * * *" ] || [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
+        elif [ "${{ github.event.schedule }}" = "0 0 * * *" ] || [ "${{ github.event.schedule }}" = "30 0 * * *" ] || [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
           echo "mode=morning" >> $GITHUB_OUTPUT
         else
           echo "mode=afternoon" >> $GITHUB_OUTPUT
