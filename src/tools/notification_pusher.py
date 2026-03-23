@@ -1,17 +1,267 @@
 """
 飞书消息推送工具模块
-- push_morning_reminders: 上午推送（满7天及超过7天未联系的客户）
-- push_afternoon_reminders: 下午推送（今日已联系客户总结）
 """
 
 from langchain.tools import tool, ToolRuntime
 from coze_coding_utils.runtime_ctx.context import new_context
 import os
 import requests
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
 
-# ============ 普通函数（包含实际逻辑）============
+
+# ============ 约见/外访推送相关 ============
+
+def _get_meeting_customers(target_date) -> str:
+    """获取指定日期有约见的客户列表"""
+    try:
+        from supabase import create_client
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_ANON_KEY")
+        if not url or not key:
+            return ""
+        
+        client = create_client(url, key)
+        target_date_str = target_date.strftime("%Y-%m-%d")
+        
+        result = client.table('customers').select('name, company').eq('meeting_date', target_date_str).execute()
+        
+        if not result.data:
+            return ""
+        
+        lines = []
+        for c in result.data:
+            name = c.get('name', '未知')
+            company = c.get('company', '未知公司')
+            lines.append(f"{name} - {company}")
+        
+        return "\n".join(lines)
+        
+    except Exception as e:
+        return ""
+
+
+def _get_visit_customers(target_date) -> str:
+    """获取指定日期有外访的客户列表"""
+    try:
+        from supabase import create_client
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_ANON_KEY")
+        if not url or not key:
+            return ""
+        
+        client = create_client(url, key)
+        target_date_str = target_date.strftime("%Y-%m-%d")
+        
+        result = client.table('customers').select('name, company').eq('visit_date', target_date_str).execute()
+        
+        if not result.data:
+            return ""
+        
+        lines = []
+        for c in result.data:
+            name = c.get('name', '未知')
+            company = c.get('company', '未知公司')
+            lines.append(f"{name} - {company}")
+        
+        return "\n".join(lines)
+        
+    except Exception as e:
+        return ""
+
+
+def _push_meeting_plan_impl(ctx=None) -> str:
+    """约见计划推送：提醒明天有约见"""
+    try:
+        webhook_url = os.getenv("FEISHU_WEBHOOK_URL")
+        if not webhook_url:
+            return "❌ 未配置飞书Webhook URL"
+        
+        tomorrow = datetime.now() + timedelta(days=1)
+        customers_text = _get_meeting_customers(tomorrow)
+        
+        if not customers_text:
+            return "ℹ️ 明天没有约见安排"
+        
+        card_content = {
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": "📅 约见计划"},
+                    "template": "purple"
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"## 明天有约见\n\n{customers_text}"
+                        }
+                    }
+                ]
+            }
+        }
+        
+        response = requests.post(webhook_url, json=card_content, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("StatusCode") == 0 or result.get("code") == 0:
+                return f"✅ 约见计划已推送！\n\n{customers_text}"
+            else:
+                return f"❌ 飞书推送失败：{result}"
+        else:
+            return f"❌ 飞书推送失败：HTTP {response.status_code}"
+            
+    except Exception as e:
+        return f"❌ 推送失败：{str(e)}"
+
+
+def _push_meeting_notify_impl(ctx=None) -> str:
+    """约见通知推送：提醒今天有约见"""
+    try:
+        webhook_url = os.getenv("FEISHU_WEBHOOK_URL")
+        if not webhook_url:
+            return "❌ 未配置飞书Webhook URL"
+        
+        today = datetime.now()
+        customers_text = _get_meeting_customers(today)
+        
+        if not customers_text:
+            return "ℹ️ 今天没有约见安排"
+        
+        card_content = {
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": "🔔 约见通知"},
+                    "template": "red"
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"## 今天有约见\n\n{customers_text}"
+                        }
+                    }
+                ]
+            }
+        }
+        
+        response = requests.post(webhook_url, json=card_content, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("StatusCode") == 0 or result.get("code") == 0:
+                return f"✅ 约见通知已推送！\n\n{customers_text}"
+            else:
+                return f"❌ 飞书推送失败：{result}"
+        else:
+            return f"❌ 飞书推送失败：HTTP {response.status_code}"
+            
+    except Exception as e:
+        return f"❌ 推送失败：{str(e)}"
+
+
+def _push_visit_reminder_impl(ctx=None) -> str:
+    """外访提醒推送：提醒明天有外访"""
+    try:
+        webhook_url = os.getenv("FEISHU_WEBHOOK_URL")
+        if not webhook_url:
+            return "❌ 未配置飞书Webhook URL"
+        
+        tomorrow = datetime.now() + timedelta(days=1)
+        customers_text = _get_visit_customers(tomorrow)
+        
+        if not customers_text:
+            return "ℹ️ 明天没有外访安排"
+        
+        card_content = {
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": "🚗 外访提醒"},
+                    "template": "orange"
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"## 明天外访\n\n{customers_text}"
+                        }
+                    }
+                ]
+            }
+        }
+        
+        response = requests.post(webhook_url, json=card_content, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("StatusCode") == 0 or result.get("code") == 0:
+                return f"✅ 外访提醒已推送！\n\n{customers_text}"
+            else:
+                return f"❌ 飞书推送失败：{result}"
+        else:
+            return f"❌ 飞书推送失败：HTTP {response.status_code}"
+            
+    except Exception as e:
+        return f"❌ 推送失败：{str(e)}"
+
+
+def _push_visit_notify_impl(ctx=None) -> str:
+    """外访通知推送：提醒今天有外访"""
+    try:
+        webhook_url = os.getenv("FEISHU_WEBHOOK_URL")
+        if not webhook_url:
+            return "❌ 未配置飞书Webhook URL"
+        
+        today = datetime.now()
+        customers_text = _get_visit_customers(today)
+        
+        if not customers_text:
+            return "ℹ️ 今天没有外访安排"
+        
+        card_content = {
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": "🔔 外访通知"},
+                    "template": "yellow"
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"## 今天需要外访\n\n{customers_text}"
+                        }
+                    }
+                ]
+            }
+        }
+        
+        response = requests.post(webhook_url, json=card_content, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("StatusCode") == 0 or result.get("code") == 0:
+                return f"✅ 外访通知已推送！\n\n{customers_text}"
+            else:
+                return f"❌ 飞书推送失败：{result}"
+        else:
+            return f"❌ 飞书推送失败：HTTP {response.status_code}"
+            
+    except Exception as e:
+        return f"❌ 推送失败：{str(e)}"
+
+
+# ============ 客户关怀推送 ============
 
 def _push_morning_reminders_impl(ctx=None) -> str:
     """上午推送：满7天及超过7天未联系的客户"""
@@ -40,10 +290,6 @@ def _push_morning_reminders_impl(ctx=None) -> str:
                             "tag": "lark_md",
                             "content": reminders_text
                         }
-                    },
-                    {
-                        "tag": "note",
-                        "elements": [{"tag": "plain_text", "content": "由客户关怀智能体自动推送"}]
                     }
                 ]
             }
@@ -54,7 +300,7 @@ def _push_morning_reminders_impl(ctx=None) -> str:
         if response.status_code == 200:
             result = response.json()
             if result.get("StatusCode") == 0 or result.get("code") == 0:
-                return f"✅ 提醒已成功推送到飞书！\n\n{reminders_text}"
+                return f"✅ 提醒已成功推送到飞书！"
             else:
                 return f"❌ 飞书推送失败：{result}"
         else:
@@ -91,10 +337,6 @@ def _push_afternoon_reminders_impl(ctx=None) -> str:
                             "tag": "lark_md",
                             "content": summary_text
                         }
-                    },
-                    {
-                        "tag": "note",
-                        "elements": [{"tag": "plain_text", "content": "由客户关怀智能体自动推送"}]
                     }
                 ]
             }
@@ -105,7 +347,7 @@ def _push_afternoon_reminders_impl(ctx=None) -> str:
         if response.status_code == 200:
             result = response.json()
             if result.get("StatusCode") == 0 or result.get("code") == 0:
-                return f"✅ 总结已成功推送到飞书！\n\n{summary_text}"
+                return f"✅ 总结已成功推送到飞书！"
             else:
                 return f"❌ 飞书推送失败：{result}"
         else:
@@ -115,78 +357,12 @@ def _push_afternoon_reminders_impl(ctx=None) -> str:
         return f"❌ 推送总结失败：{str(e)}"
 
 
-def _push_reminders_impl(ctx=None) -> str:
-    """推送提醒到飞书（兼容旧版本）"""
-    return _push_morning_reminders_impl(ctx)
-
-
-def _send_custom_message_impl(message: str, ctx=None) -> str:
-    """发送自定义消息的实际逻辑"""
-    try:
-        webhook_url = os.getenv("FEISHU_WEBHOOK_URL")
-        if not webhook_url:
-            return "❌ 未配置飞书Webhook URL"
-        
-        card_content = {
-            "msg_type": "interactive",
-            "card": {
-                "config": {"wide_screen_mode": True},
-                "header": {
-                    "title": {"tag": "plain_text", "content": "📢 智能体消息"},
-                    "template": "turquoise"
-                },
-                "elements": [
-                    {
-                        "tag": "div",
-                        "text": {
-                            "tag": "lark_md",
-                            "content": message
-                        }
-                    }
-                ]
-            }
-        }
-        
-        response = requests.post(webhook_url, json=card_content, timeout=10)
-        
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("StatusCode") == 0 or result.get("code") == 0:
-                return "✅ 消息已成功发送到飞书！"
-            else:
-                return f"❌ 飞书发送失败：{result}"
-        else:
-            return f"❌ 飞书发送失败：HTTP {response.status_code}"
-            
-    except Exception as e:
-        return f"❌ 发送消息失败：{str(e)}"
-
-
-# ============ Tool函数 ============
-
-@tool
-def push_morning_reminders(runtime: ToolRuntime = None) -> str:
-    """推送上午提醒（满7天及超过7天未联系的客户）"""
-    ctx = runtime.context if runtime else new_context(method="push_morning_reminders")
-    return _push_morning_reminders_impl(ctx)
-
-
-@tool
-def push_afternoon_reminders(runtime: ToolRuntime = None) -> str:
-    """推送下午总结（今日已联系客户）"""
-    ctx = runtime.context if runtime else new_context(method="push_afternoon_reminders")
-    return _push_afternoon_reminders_impl(ctx)
-
-
-@tool
-def push_reminders(runtime: ToolRuntime = None) -> str:
-    """推送客户提醒到飞书群"""
-    ctx = runtime.context if runtime else new_context(method="push_reminders")
-    return _push_reminders_impl(ctx)
-
-
-@tool
-def send_custom_message_to_feishu(message: str, runtime: ToolRuntime = None) -> str:
-    """发送自定义消息到飞书群"""
-    ctx = runtime.context if runtime else new_context(method="send_custom_message_to_feishu")
-    return _send_custom_message_impl(message, ctx)
+# 导出
+__all__ = [
+    '_push_morning_reminders_impl',
+    '_push_afternoon_reminders_impl',
+    '_push_meeting_plan_impl',
+    '_push_meeting_notify_impl',
+    '_push_visit_reminder_impl',
+    '_push_visit_notify_impl',
+]
