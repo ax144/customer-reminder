@@ -12,9 +12,8 @@ def get_supabase_client(ctx: Optional[Any] = None) -> Client:
     if _client:
         return _client
     
-    # 优先从COZE环境变量获取
-    url = os.environ.get('COZE_SUPABASE_URL') or os.environ.get('SUPABASE_URL')
-    key = os.environ.get('COZE_SUPABASE_ANON_KEY') or os.environ.get('SUPABASE_ANON_KEY')
+    url = os.environ.get('SUPABASE_URL') or os.environ.get('COZE_SUPABASE_URL')
+    key = os.environ.get('SUPABASE_ANON_KEY') or os.environ.get('COZE_SUPABASE_ANON_KEY')
     
     if not url or not key:
         raise ValueError("请设置 SUPABASE_URL 和 SUPABASE_ANON_KEY 环境变量")
