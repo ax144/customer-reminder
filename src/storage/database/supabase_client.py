@@ -1,13 +1,10 @@
-"""
-Supabase 数据库客户端
-"""
+"""Supabase 数据库客户端"""
 import os
-from supabase import create_client, Client
-from typing import Optional, Any
+from supabase import create_client
 
 _client = None
 
-def get_supabase_client(ctx: Optional[Any] = None) -> Client:
+def get_supabase_client():
     global _client
     if _client:
         return _client
