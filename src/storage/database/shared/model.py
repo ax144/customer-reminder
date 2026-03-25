@@ -3,7 +3,7 @@ from coze_coding_dev_sdk.database import Base
 from typing import Optional
 import datetime
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Double, Integer, Numeric, PrimaryKeyConstraint, Table, Text, text, String, JSON, Date, func
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Double, Integer, Numeric, PrimaryKeyConstraint, Table, Text, text, String, JSON, Date, func, Time
 from sqlalchemy.dialects.postgresql import OID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -115,14 +115,12 @@ class Document(Base):
     __tablename__ = "documents"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    doc_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="文档类型")
     title: Mapped[str] = mapped_column(String(500), nullable=False, comment="文档标题")
-    category: Mapped[str] = mapped_column(String(100), nullable=False, comment="文档分类")
-    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="文档内容摘要")
-    keywords: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, comment="关键词数组")
-    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="原始文件路径")
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="文档内容")
+    tags: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, comment="标签数组")
+    client_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="关联客户/项目")
     file_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="文件URL")
-    project: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="关联项目")
-    status: Mapped[Optional[str]] = mapped_column(String(50), default='active', nullable=True, comment="状态")
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True, comment="创建时间")
     updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True, comment="更新时间")
 
@@ -132,14 +130,16 @@ class WorkSchedule(Base):
     __tablename__ = "work_schedules"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    title: Mapped[str] = mapped_column(String(500), nullable=False, comment="安排标题")
     assignee: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="负责人")
-    project: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="关联项目")
-    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="安排内容")
+    task_type: Mapped[str] = mapped_column(String(50), nullable=False, comment="任务类型")
+    task_title: Mapped[str] = mapped_column(String(500), nullable=False, comment="任务标题")
+    task_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="任务描述")
+    client_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="关联客户")
+    scheduled_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True, comment="计划日期")
+    scheduled_time: Mapped[Optional[datetime.time]] = mapped_column(Time, nullable=True, comment="计划时间")
     priority: Mapped[Optional[str]] = mapped_column(String(20), default='medium', nullable=True, comment="优先级")
     status: Mapped[Optional[str]] = mapped_column(String(50), default='pending', nullable=True, comment="状态")
-    due_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True, comment="截止日期")
-    related_customers: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, comment="关联客户")
-    related_documents: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, comment="关联文档ID")
+    reminder_enabled: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True, comment="是否提醒")
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True, comment="创建时间")
     updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True, comment="更新时间")
