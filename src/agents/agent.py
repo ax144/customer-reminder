@@ -30,6 +30,13 @@ from tools.schedule_manager import (
     get_today_tasks, list_schedules, delete_schedule
 )
 from tools.smart_recognition import smart_save
+from tools.schedule_customer_link import (
+    link_schedule_to_customer,
+    complete_schedule_and_update_customer,
+    get_customer_schedules,
+    get_schedule_customers,
+    sync_schedules_to_customers
+)
 
 # 配置文件路径
 LLM_CONFIG = "config/agent_llm_config.json"
@@ -101,6 +108,12 @@ def build_agent(ctx=None):
         delete_schedule,
         # 智能识别工具
         smart_save,
+        # 工作安排与客户互通工具
+        link_schedule_to_customer,
+        complete_schedule_and_update_customer,
+        get_customer_schedules,
+        get_schedule_customers,
+        sync_schedules_to_customers,
     ]
     
     # 创建并返回Agent
