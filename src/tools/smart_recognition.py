@@ -109,6 +109,25 @@ def _detect_document_category(content: str) -> str:
     return '其他文档'
 
 
+def _detect_task_type(content: str) -> str:
+    """识别任务类型"""
+    task_types = {
+        '项目跟进': ['项目', '跟进', '推进', '落地'],
+        '客户拜访': ['拜访', '走访', '上门', '面谈'],
+        '需求调研': ['调研', '需求', '了解', '收集'],
+        '会议': ['会议', '讨论', '沟通', '汇报'],
+        '电话跟进': ['电话', '致电', '联系'],
+    }
+    
+    content_lower = content.lower()
+    for task_type, keywords in task_types.items():
+        for kw in keywords:
+            if kw in content_lower:
+                return task_type
+    
+    return '其他'
+
+
 def _extract_document_info(content: str, filename: str = None) -> Dict[str, Any]:
     """从内容中提取文档信息"""
     lines = content.split('\n')
@@ -126,26 +145,26 @@ def _extract_document_info(content: str, filename: str = None) -> Dict[str, Any]
         title = lines[0].strip()[:100] if lines[0].strip() else '未命名文档'
     
     # 提取关键词
-    keywords = []
-    keyword_patterns = ['PLM', '数字化转型', '汽车零部件', '半导体', '新能源', 
-                       '助力科技', '合肥', '需求', '营销', '推广', '客户']
-    for kw in keyword_patterns:
+    tags = []
+    tag_patterns = ['PLM', '数字化转型', '汽车零部件', '半导体', '新能源', 
+                    '助力科技', '合肥', '需求', '营销', '推广', '客户']
+    for kw in tag_patterns:
         if kw in content:
-            keywords.append(kw)
+            tags.append(kw)
     
-    # 提取项目名
-    project = None
+    # 提取客户/项目名
+    client_name = None
     project_match = re.search(r'([^\s]+项目)', content)
     if project_match:
-        project = project_match.group(1)
+        client_name = project_match.group(1)
     
     return {
         'title': title,
-        'category': _detect_document_category(content.lower()),
+        'doc_type': _detect_document_category(content.lower()),
         'content': content[:500] + '...' if len(content) > 500 else content,
-        'keywords': keywords[:10],
-        'project': project,
-        'file_path': filename
+        'tags': tags[:10],
+        'client_name': client_name,
+        'file_url': None
     }
 
 
@@ -154,14 +173,17 @@ def _extract_schedule_info(content: str) -> Dict[str, Any]:
     lines = content.split('\n')
     
     # 提取标题
-    title = None
+    task_title = None
     for line in lines[:3]:
         line = line.strip()
         if line and len(line) < 50:
-            title = line
+            task_title = line
             break
-    if not title:
-        title = '工作安排'
+    if not task_title:
+        task_title = '工作安排'
+    
+    # 提取任务类型
+    task_type = _detect_task_type(content)
     
     # 提取负责人
     assignee = None
@@ -169,11 +191,11 @@ def _extract_schedule_info(content: str) -> Dict[str, Any]:
     if assignee_match:
         assignee = assignee_match.group(2)
     
-    # 提取截止日期
-    due_date = None
+    # 提取计划日期
+    scheduled_date = None
     date_match = re.search(r'(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})', content)
     if date_match:
-        due_date = date_match.group(1).replace('年', '-').replace('月', '-').replace('/', '-')
+        scheduled_date = date_match.group(1).replace('年', '-').replace('月', '-').replace('/', '-')
     
     # 判断优先级
     priority = 'medium'
@@ -183,11 +205,12 @@ def _extract_schedule_info(content: str) -> Dict[str, Any]:
         priority = 'low'
     
     return {
-        'title': title,
+        'task_title': task_title,
+        'task_type': task_type,
         'assignee': assignee,
-        'content': content[:300],
+        'notes': content[:300],
         'priority': priority,
-        'due_date': due_date
+        'scheduled_date': scheduled_date
     }
 
 
@@ -224,25 +247,26 @@ def smart_save(
         info = _extract_document_info(content, filename)
         result = _save_document_impl(
             title=info['title'],
-            category=info['category'],
+            doc_type=info['doc_type'],
             content=info['content'],
-            keywords=info['keywords'],
-            project=info['project'],
-            file_path=info['file_path']
+            tags=info['tags'],
+            client_name=info['client_name'],
+            file_url=info['file_url']
         )
-        return f"📄 已识别为【{info['category']}】\n{result}"
+        return f"📄 已识别为【{info['doc_type']}】\n{result}"
     
     elif content_type == 'schedule':
         from tools.schedule_manager import _save_schedule_impl
         info = _extract_schedule_info(content)
         result = _save_schedule_impl(
-            title=info['title'],
+            task_title=info['task_title'],
+            task_type=info['task_type'],
             assignee=info['assignee'],
-            content=info['content'],
+            notes=info['notes'],
             priority=info['priority'],
-            due_date=info['due_date']
+            scheduled_date=info['scheduled_date']
         )
-        return f"📅 已识别为【工作安排】\n{result}"
+        return f"📅 已识别为【{info['task_type']}】\n{result}"
     
     elif content_type == 'customer':
         return "👤 识别为客户信息，请使用 save_customer 工具保存"
@@ -261,6 +285,7 @@ def smart_save(
 __all__ = [
     '_detect_content_type',
     '_detect_document_category',
+    '_detect_task_type',
     '_extract_document_info',
     '_extract_schedule_info',
     'smart_save',
