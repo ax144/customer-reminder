@@ -22,20 +22,12 @@ from tools.notification_pusher import (
     push_reminders, push_morning_reminders, 
     push_afternoon_reminders, send_custom_message_to_feishu
 )
-from tools.document_manager import (
-    save_document, query_document, list_documents, delete_document
+from tools.alumni_manager import (
+    search_alumni, get_all_alumni, 
+    get_alumni_by_company, get_alumni_by_position
 )
-from tools.schedule_manager import (
-    save_schedule, query_schedule, update_schedule_status,
-    get_today_tasks, list_schedules, delete_schedule
-)
-from tools.smart_recognition import smart_save
-from tools.schedule_customer_link import (
-    link_schedule_to_customer,
-    complete_schedule_and_update_customer,
-    get_customer_schedules,
-    get_schedule_customers,
-    sync_schedules_to_customers
+from tools.web_search_tool import (
+    web_search, search_company_info, search_government_alumni
 )
 
 # 配置文件路径
@@ -82,38 +74,23 @@ def build_agent(ctx=None):
     
     # 注册所有工具
     tools = [
-        # 客户管理工具
         save_customer,
         query_customer,
         get_reminders,
         mark_contacted,
         delete_customer,
         update_project_progress,
-        # 飞书推送工具
         push_reminders,
         push_morning_reminders,
         push_afternoon_reminders,
         send_custom_message_to_feishu,
-        # 文档库工具
-        save_document,
-        query_document,
-        list_documents,
-        delete_document,
-        # 工作安排工具
-        save_schedule,
-        query_schedule,
-        update_schedule_status,
-        get_today_tasks,
-        list_schedules,
-        delete_schedule,
-        # 智能识别工具
-        smart_save,
-        # 工作安排与客户互通工具
-        link_schedule_to_customer,
-        complete_schedule_and_update_customer,
-        get_customer_schedules,
-        get_schedule_customers,
-        sync_schedules_to_customers,
+        search_alumni,
+        get_all_alumni,
+        get_alumni_by_company,
+        get_alumni_by_position,
+        web_search,
+        search_company_info,
+        search_government_alumni
     ]
     
     # 创建并返回Agent
