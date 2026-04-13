@@ -1,61 +1,28 @@
 """
 安徽财经大学校友信息管理工具
-直接从Excel文件读取数据，不依赖数据库
+从 Supabase 数据库读取数据，支持添加、更新校友
 """
 
 from langchain.tools import tool, ToolRuntime
 from coze_coding_utils.runtime_ctx.context import new_context
 import os
-import pandas as pd
 import re
 from typing import Optional, List, Dict, Any
+from storage.database.supabase_client import get_supabase_client
 
 
-# 校友数据缓存
-_alumni_data_cache = None
-_cache_loaded = False
-
-
-def _get_alumni_data() -> List[Dict[str, Any]]:
-    """从Excel文件加载校友数据"""
-    global _alumni_data_cache, _cache_loaded
-    
-    if _cache_loaded and _alumni_data_cache is not None:
-        return _alumni_data_cache
-    
-    # Excel文件路径
-    excel_path = "assets/安财担任上市公司高管的校友录.xlsx"
-    
-    if not os.path.exists(excel_path):
-        raise FileNotFoundError(f"找不到校友数据文件: {excel_path}")
-    
-    # 读取Excel
-    df = pd.read_excel(excel_path)
-    
-    alumni_list = []
-    for _, row in df.iterrows():
-        alumni = {
-            'id': len(alumni_list) + 1,
-            'name': str(row.get('校友姓名', '')),
-            'background': str(row.get('相关专业/背景', '')),
-            'company': str(row.get('上市公司（股票代码）', '')),
-            'stock_code': '',
-            'position': str(row.get('担任职务', ''))
-        }
-        
-        # 提取股票代码
-        company_str = alumni['company']
-        if '（' in company_str and '）' in company_str:
-            match = re.search(r'（([^）]+)）', company_str)
-            if match:
-                alumni['stock_code'] = match.group(1)
-        
-        alumni_list.append(alumni)
-    
-    _alumni_data_cache = alumni_list
-    _cache_loaded = True
-    
-    return alumni_list
+def _get_alumni_data(ctx=None) -> List[Dict[str, Any]]:
+    """从 Supabase 数据库加载校友数据"""
+    try:
+        client = get_supabase_client(ctx=ctx)
+        result = client.table("alumni").select("*").order("name").execute()
+        return result.data if result.data else []
+    except Exception as e:
+        # 如果表找不到，尝试其他方式或者给出更友好的错误
+        error_msg = str(e)
+        if "PGRST205" in error_msg or "Could not find the table" in error_msg:
+            raise Exception(f"未找到校友数据表，请确保Supabase中已创建'alumni'表。错误：{error_msg}")
+        raise Exception(f"从 Supabase 加载校友数据失败: {error_msg}")
 
 
 def _search_alumni_impl(
@@ -66,26 +33,22 @@ def _search_alumni_impl(
 ) -> List[Dict[str, Any]]:
     """查询校友信息"""
     try:
-        alumni_list = _get_alumni_data()
+        client = get_supabase_client(ctx=ctx)
         
-        result = alumni_list
+        query = client.table("alumni").select("*")
         
         if name:
-            name_lower = name.lower()
-            result = [a for a in result if name_lower in a['name'].lower()]
+            query = query.ilike("name", f"%{name}%")
         
         if company:
-            company_lower = company.lower()
-            result = [a for a in result if company_lower in a['company'].lower()]
+            query = query.ilike("company", f"%{company}%")
         
         if position:
-            position_lower = position.lower()
-            result = [a for a in result if position_lower in a['position'].lower()]
+            query = query.ilike("position", f"%{position}%")
         
-        # 按姓名排序
-        result.sort(key=lambda x: x['name'])
+        result = query.order("name").execute()
         
-        return result
+        return result.data if result.data else []
         
     except Exception as e:
         raise Exception(f"查询校友信息失败: {str(e)}")
@@ -116,9 +79,7 @@ def _format_alumni_result(alumni_list: List[Dict[str, Any]]) -> str:
 def _get_all_alumni_impl(ctx=None) -> List[Dict[str, Any]]:
     """获取所有校友信息"""
     try:
-        alumni_list = _get_alumni_data()
-        alumni_list.sort(key=lambda x: x['name'])
-        return alumni_list
+        return _get_alumni_data(ctx=ctx)
     except Exception as e:
         raise Exception(f"获取校友信息失败: {str(e)}")
 
@@ -139,7 +100,7 @@ def _get_alumni_by_position_impl(position_keyword: str, ctx=None) -> List[Dict[s
         raise Exception(f"查询校友信息失败: {str(e)}")
 
 
-# ============ Agent 工具函数 ============
+# ============ 查询工具 ============
 
 @tool
 def search_alumni(
@@ -225,15 +186,165 @@ def get_alumni_by_position(position_keyword: str, runtime: ToolRuntime = None) -
         return f"❌ 查询失败: {str(e)}"
 
 
+# ============ 添加/更新工具 ============
+
+@tool
+def add_alumni(
+    name: str,
+    company: Optional[str] = None,
+    position: Optional[str] = None,
+    industry: Optional[str] = None,
+    region: Optional[str] = None,
+    graduation_year: Optional[int] = None,
+    background: Optional[str] = None,
+    contact_info: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    notes: Optional[str] = None,
+    runtime: ToolRuntime = None
+) -> str:
+    """
+    添加校友
+    
+    Args:
+        name: 姓名（必填）
+        company: 公司（可选）
+        position: 职位（可选）
+        industry: 行业（可选）
+        region: 地区（可选）
+        graduation_year: 毕业年份（可选）
+        background: 背景介绍（可选）
+        contact_info: 其他联系方式（可选）
+        email: 邮箱（可选）
+        phone: 电话（可选）
+        notes: 备注（可选）
+    
+    Returns:
+        添加结果
+    """
+    ctx = runtime.context if runtime else new_context(method="add_alumni")
+    
+    try:
+        client = get_supabase_client(ctx=ctx)
+        
+        data = {
+            "name": name
+        }
+        
+        if company:
+            data["company"] = company
+        if position:
+            data["position"] = position
+        if industry:
+            data["industry"] = industry
+        if region:
+            data["region"] = region
+        if graduation_year:
+            data["graduation_year"] = graduation_year
+        if background:
+            data["background"] = background
+        if contact_info:
+            data["contact_info"] = contact_info
+        if email:
+            data["email"] = email
+        if phone:
+            data["phone"] = phone
+        if notes:
+            data["notes"] = notes
+        
+        result = client.table("alumni").insert(data).execute()
+        
+        if result.data:
+            return f"✅ 成功添加校友：{name}"
+        else:
+            return "❌ 添加失败"
+            
+    except Exception as e:
+        return f"❌ 添加失败：{str(e)}"
+
+
+@tool
+def update_alumni(
+    name: str,
+    company: Optional[str] = None,
+    position: Optional[str] = None,
+    industry: Optional[str] = None,
+    region: Optional[str] = None,
+    graduation_year: Optional[int] = None,
+    background: Optional[str] = None,
+    contact_info: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    notes: Optional[str] = None,
+    runtime: ToolRuntime = None
+) -> str:
+    """
+    更新校友
+    
+    Args:
+        name: 姓名（必填，用于查找要更新的记录）
+        company: 公司（可选，更新时用）
+        position: 职位（可选）
+        industry: 行业（可选）
+        region: 地区（可选）
+        graduation_year: 毕业年份（可选）
+        background: 背景介绍（可选）
+        contact_info: 其他联系方式（可选）
+        email: 邮箱（可选）
+        phone: 电话（可选）
+        notes: 备注（可选）
+    
+    Returns:
+        更新结果
+    """
+    ctx = runtime.context if runtime else new_context(method="update_alumni")
+    
+    try:
+        client = get_supabase_client(ctx=ctx)
+        
+        data = {}
+        
+        if company:
+            data["company"] = company
+        if position:
+            data["position"] = position
+        if industry:
+            data["industry"] = industry
+        if region:
+            data["region"] = region
+        if graduation_year:
+            data["graduation_year"] = graduation_year
+        if background:
+            data["background"] = background
+        if contact_info:
+            data["contact_info"] = contact_info
+        if email:
+            data["email"] = email
+        if phone:
+            data["phone"] = phone
+        if notes:
+            data["notes"] = notes
+        
+        if not data:
+            return "❌ 没有提供要更新的字段"
+        
+        result = client.table("alumni").update(data).eq("name", name).execute()
+        
+        if result.data:
+            return f"✅ 成功更新校友：{name}"
+        else:
+            return f"❌ 更新失败，未找到姓名为 {name} 的记录"
+            
+    except Exception as e:
+        return f"❌ 更新失败：{str(e)}"
+
+
 # 导出
 __all__ = [
-    '_get_alumni_data',
-    '_search_alumni_impl',
-    '_get_all_alumni_impl',
-    '_get_alumni_by_company_impl',
-    '_get_alumni_by_position_impl',
     'search_alumni',
     'get_all_alumni',
     'get_alumni_by_company',
     'get_alumni_by_position',
+    'add_alumni',
+    'update_alumni',
 ]
